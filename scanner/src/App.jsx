@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { BrowserCodeReader, BrowserMultiFormatReader } from "@zxing/browser";
+import { BrowserCodeReader, BrowserDatamatrixCodeReader } from "@zxing/browser";
 import { lookupCode } from "./api";
 import { parseGs1 } from "./gs1";
 
-const reader = new BrowserMultiFormatReader();
+const reader = new BrowserDatamatrixCodeReader();
 
 function statusLabel(status) {
   const labels = {
@@ -28,6 +28,7 @@ function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [manual, setManual] = useState("");
+  const [cameraReady, setCameraReady] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -38,6 +39,7 @@ function App() {
         setDevices(list);
         const back = list.find(d => /back|rear|environment|зад/i.test(d.label));
         setDeviceId(back?.deviceId || list[0]?.deviceId || "");
+        setCameraReady(list.length > 0);
       })
       .catch(() => {
         if (active) setError("Не удалось получить доступ к камере. Разрешите камеру в браузере.");
@@ -78,11 +80,16 @@ function App() {
     setError("");
     setMessage("Наведите камеру на DataMatrix");
     setScanning(true);
+    setMessage("Запускаем камеру…");
 
     try {
       controlsRef.current?.stop();
-      controlsRef.current = await reader.decodeFromVideoDevice(
-        deviceId || undefined,
+      controlsRef.current = await reader.decodeFromConstraints(
+        {
+          video: deviceId
+            ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+            : { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        },
         videoRef.current,
         (result, error) => {
           if (result) {
@@ -95,6 +102,7 @@ function App() {
       );
     } catch (e) {
       setScanning(false);
+      setMessage("Камера недоступна");
       setError("Камера недоступна. Проверьте разрешение браузера и HTTPS.");
     }
   }
@@ -152,7 +160,7 @@ function App() {
             {!scanning && (
               <div className="camera-placeholder">
                 <div className="camera-icon">⌗</div>
-                <strong>Камера готова</strong>
+                <strong>{cameraReady ? "Камера готова" : "Камера не найдена"}</strong>
                 <small>{message}</small>
               </div>
             )}
