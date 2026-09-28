@@ -1,1 +1,32 @@
-<!doctype html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>АИС маркировки учебников</title><link rel="stylesheet" href="/styles.css"></head><body><div class="app"><aside class="sidebar"><div class="logo">ТЕКШЕР <span>AIS</span></div><nav id="nav"><button class="active">Главная</button><button>Участники</button><button>Учебники</button><button>Коды маркировки</button><button>Заказы КМ</button><button>Операции</button><button>Документы</button><button>Финансы</button><button>История</button><button>Настройки</button></nav></aside><main><header><div><h1>АИС маркировки учебников</h1><p>Рабочая панель MVP</p></div><button class="refresh" id="refresh">Обновить</button></header><div id="error" class="error hidden"></div><section class="cards"><div class="card"><span>Учебники</span><strong id="textbooks">0</strong></div><div class="card"><span>Коды маркировки</span><strong id="codes">0</strong></div><div class="card"><span>Заказы КМ</span><strong id="orders">0</strong></div><div class="card"><span>Участники</span><strong id="participants">0</strong></div></section><section class="panel"><h2>Последние учебники</h2><table><thead><tr><th>Название</th><th>GTIN</th><th>Автор</th><th>Статус</th></tr></thead><tbody id="textbookRows"></tbody></table><div id="empty" class="empty">Карточек пока нет</div></section></main></div><script src="/app.js"></script></body></html>
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>ТЕКШЕР AIS – маркировка учебников</title><link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+  <div class="logo">ТЕКШЕР <span>AIS</span></div>
+  <nav id="nav">
+    <button class="active" data-page="dashboard">Главная</button>
+    <button data-page="participants">Участники</button>
+    <button data-page="textbooks">Учебники</button>
+    <button data-page="codes">Коды маркировки</button>
+    <button data-page="orders">Заказы КМ</button>
+    <button data-page="operations">Операции</button>
+    <button data-page="documents">Документы</button>
+    <button data-page="finance">Финансы</button>
+    <button data-page="history">История</button>
+    <button data-page="settings">Настройки</button>
+  </nav>
+</aside>
+<main>
+  <header><div><h1 id="pageTitle">АИС маркировки учебников</h1><p id="pageSubtitle">Рабочая панель MVP</p></div><button class="refresh" id="refresh">Обновить</button></header>
+  <div id="error" class="error hidden"></div>
+  <div id="content"></div>
+</main>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
