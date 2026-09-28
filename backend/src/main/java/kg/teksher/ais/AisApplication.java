@@ -44,7 +44,7 @@ class AisException extends RuntimeException {
 @RestControllerAdvice
 class Errors {
     @ExceptionHandler(AisException.class)
-    Map<String,Object> api(AisException e){return Map.of("code",e.code,"message",e.getMessage(),"timestamp",OffsetDateTime.now().toString());}
+    org.springframework.http.ResponseEntity<Map<String,Object>> api(AisException e){return org.springframework.http.ResponseEntity.status(e.status).body(Map.of("code",e.code,"message",e.getMessage(),"timestamp",OffsetDateTime.now().toString()));}
     @ExceptionHandler(Exception.class)
     @org.springframework.web.bind.annotation.ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     Map<String,Object> other(Exception e){return Map.of("code","INTERNAL_ERROR","message",e.getMessage()==null?"Внутренняя ошибка":e.getMessage(),"timestamp",OffsetDateTime.now().toString());}
@@ -91,7 +91,7 @@ class AisService {
     synchronized BillingOperation refund(UUID id){var o=bill(id);if(!o.status().equals("CAPTURED"))return o;balances.merge(o.participantId(),o.amount(),BigDecimal::add);return updateBill(o,"REFUNDED");}
     BillingOperation updateBill(BillingOperation o,String status){var n=new BillingOperation(o.id(),o.participantId(),o.type(),o.amount(),status,o.createdAt(),OffsetDateTime.now());billing.put(o.id(),n);return n;}
 
-    String serial(){String s;do{s=UUID.randomUUID().toString().replace("-","").substring(0,13).toUpperCase();}while(codes.values().stream().anyMatch(c->c.serial().equals(s)));return s;}
+    String serial(){while(true){String candidate=UUID.randomUUID().toString().replace("-","").substring(0,13).toUpperCase();if(codes.values().stream().noneMatch(c->c.serial().equals(candidate)))return candidate;}}
     String dataMatrix(String payload){
         try{BitMatrix m=new DataMatrixWriter().encode(payload,BarcodeFormat.DATA_MATRIX,280,280,Map.of(EncodeHintType.MARGIN,2));ByteArrayOutputStream out=new ByteArrayOutputStream();MatrixToImageWriter.writeToStream(m,"PNG",out);return Base64.getEncoder().encodeToString(out.toByteArray());}
         catch(Exception e){throw error("DATAMATRIX_ERROR","Не удалось создать DataMatrix",HttpStatus.INTERNAL_SERVER_ERROR);}
