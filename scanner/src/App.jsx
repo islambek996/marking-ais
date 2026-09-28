@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BrowserMultiFormatReader } from "@zxing/browser";
+import { BrowserCodeReader, BrowserMultiFormatReader } from "@zxing/browser";
 import { lookupCode } from "./api";
 import { parseGs1 } from "./gs1";
 
@@ -32,7 +32,7 @@ function App() {
   useEffect(() => {
     let active = true;
 
-    reader.listVideoInputDevices()
+    BrowserCodeReader.listVideoInputDevices()
       .then(list => {
         if (!active) return;
         setDevices(list);
