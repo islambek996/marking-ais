@@ -72,7 +72,8 @@ class AuthFilter extends OncePerRequestFilter {
     private boolean allowed(User u,String method,String path){
         if(u.role().equals("ADMIN"))return true;
         if(u.role().equals("OPERATOR")){
-            if(method.equals("GET") && !path.startsWith("/api/participants") && !path.equals("/api/users"))return true;
+            if(method.equals("GET") && (!path.startsWith("/api/participants") && !path.equals("/api/users")))return true;
+            if(method.equals("GET") && path.matches("/api/participants/[^/]+") && u.participantId()!=null && path.endsWith(u.participantId().toString()))return true;
             if(method.equals("POST") && (
                 path.equals("/api/textbooks") ||
                 path.matches("/api/textbooks/[^/]+/publish") ||
