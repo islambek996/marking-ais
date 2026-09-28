@@ -17,7 +17,9 @@ function statusLabel(status) {
 
 function App() {
   const videoRef = useRef(null);
-  const controlsRef = useRef(null);
+  const streamRef = useRef(null);
+  const scanTimerRef = useRef(null);
+  const scanBusyRef = useRef(false);
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState("");
   const [scanning, setScanning] = useState(false);
@@ -47,7 +49,7 @@ function App() {
 
     return () => {
       active = false;
-      controlsRef.current?.stop();
+      stopScanner();
     };
   }, []);
 
@@ -59,7 +61,7 @@ function App() {
     setError("");
 
     if (!result.valid) {
-      setError("Не удалось определить GTIN и серийный номер GS1 DataMatrix.");
+      setError("Код считан, но это не распознаваемый GS1 DataMatrix с AI 01 и AI 21.");
       return;
     }
 
@@ -78,40 +80,132 @@ function App() {
 
   async function startScanner() {
     setError("");
-    setMessage("Наведите камеру на DataMatrix");
-    setScanning(true);
+    setData(null);
     setMessage("Запускаем камеру…");
 
     try {
-      controlsRef.current?.stop();
-      controlsRef.current = await reader.decodeFromConstraints(
-        {
-          video: deviceId
-            ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-            : { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }
-        },
-        videoRef.current,
-        (result, error) => {
-          if (result) {
-            const value = result.getText();
-            setScanning(false);
-            controlsRef.current?.stop();
-            checkRaw(value);
+      stopScanner();
+
+      const constraints = {
+        video: deviceId
+          ? {
+              deviceId: { exact: deviceId },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              focusMode: "continuous"
+            }
+          : {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              focusMode: "continuous"
+            }
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
+
+      setScanning(true);
+      setMessage("Наведите DataMatrix в рамку");
+
+      scanTimerRef.current = window.setInterval(async () => {
+        if (scanBusyRef.current || !videoRef.current || videoRef.current.readyState < 2) return;
+
+        scanBusyRef.current = true;
+        try {
+          const video = videoRef.current;
+          const size = Math.min(video.videoWidth, video.videoHeight);
+          if (!size) return;
+
+          const canvas = document.createElement("canvas");
+          canvas.width = size;
+          canvas.height = size;
+
+          const sx = (video.videoWidth - size) / 2;
+          const sy = (video.videoHeight - size) / 2;
+          canvas.getContext("2d", { willReadFrequently: true }).drawImage(
+            video,
+            sx,
+            sy,
+            size,
+            size,
+            0,
+            0,
+            size,
+            size
+          );
+
+          try {
+            const result = reader.decodeFromCanvas(canvas);
+            if (result) {
+              stopScanner();
+              await checkRaw(result.getText());
+            }
+          } catch {
+            // Кадр без распознанного кода – продолжаем сканирование.
           }
+        } finally {
+          scanBusyRef.current = false;
         }
-      );
+      }, 180);
     } catch (e) {
       setScanning(false);
       setMessage("Камера недоступна");
-      setError("Камера недоступна. Проверьте разрешение браузера и HTTPS.");
+      setError("Не удалось запустить камеру. Разрешите доступ к камере и откройте сайт через HTTPS или localhost.");
     }
   }
 
   function stopScanner() {
-    controlsRef.current?.stop();
-    controlsRef.current = null;
+    if (scanTimerRef.current) {
+      clearInterval(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
+
+    scanBusyRef.current = false;
+
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.srcObject = null;
+    }
+
     setScanning(false);
-    setMessage("Сканирование остановлено");
+  }
+
+  async function scanPhoto(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setError("");
+    setMessage("Распознаём фотографию…");
+
+    try {
+      const url = URL.createObjectURL(file);
+      const image = new Image();
+      image.onload = async () => {
+        try {
+          const result = reader.decodeFromImageElement(image);
+          await checkRaw(result.getText());
+        } catch {
+          setError("Не удалось распознать DataMatrix на фотографии.");
+        } finally {
+          URL.revokeObjectURL(url);
+          event.target.value = "";
+        }
+      };
+      image.onerror = () => {
+        URL.revokeObjectURL(url);
+        setError("Не удалось открыть фотографию.");
+        event.target.value = "";
+      };
+      image.src = url;
+    } catch {
+      setError("Не удалось обработать фотографию.");
+    }
   }
 
   async function manualCheck(event) {
@@ -186,6 +280,14 @@ function App() {
                 Остановить камеру
               </button>
             )}
+          </div>
+
+          <div className="photo-row">
+            <label className="secondary upload-button">
+              Сканировать фотографию
+              <input type="file" accept="image/*" capture="environment" onChange={scanPhoto} />
+            </label>
+            <span>Если камера не распознаёт код, сфотографируйте DataMatrix и выберите фото.</span>
           </div>
 
           <form className="manual-form" onSubmit={manualCheck}>
