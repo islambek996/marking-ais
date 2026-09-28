@@ -54,7 +54,7 @@ class AuthFilter extends OncePerRequestFilter {
     AuthFilter(AisService s){this.s=s;}
     @Override protected void doFilterInternal(HttpServletRequest req,HttpServletResponse res,FilterChain chain)throws ServletException,java.io.IOException{
         String path=req.getRequestURI(), method=req.getMethod();
-        if(!path.startsWith("/api/") || path.equals("/api/auth/login")){chain.doFilter(req,res);return;}
+        if(!path.startsWith("/api/") || path.equals("/api/auth/login") || (method.equals("GET") && path.equals("/api/public/marking-codes/lookup"))){chain.doFilter(req,res);return;}
         String h=req.getHeader("Authorization");
         if(h==null || !h.startsWith("Bearer ")){res.setStatus(401);res.setContentType("application/json");res.getWriter().write("{\"code\":\"UNAUTHORIZED\",\"message\":\"Требуется авторизация\"}");return;}
         try{
@@ -238,6 +238,7 @@ class CodesApi {
     final AisService s; CodesApi(AisService s){this.s=s;}
     @GetMapping List<MarkingCode> all(@RequestHeader("Authorization") String authorization){User u=s.requestUser(authorization);return s.codes.values().stream().filter(c->s.owns(u,c.participantId())).toList();}
     @GetMapping("/{id}") MarkingCode get(@PathVariable UUID id,@RequestHeader("Authorization") String authorization){var c=s.code(id);if(!s.owns(s.requestUser(authorization),c.participantId()))throw s.error("FORBIDDEN","Код принадлежит другому участнику",HttpStatus.FORBIDDEN);return c;}
+    @GetMapping("/lookup") Map<String,Object> lookup(@RequestParam String gtin,@RequestParam String serial){var code=s.codes.values().stream().filter(c->c.gtin().equals(gtin)&&c.serial().equals(serial)).findFirst().orElseThrow(()->s.error("CODE_NOT_FOUND","Код маркировки не найден",HttpStatus.NOT_FOUND));var textbook=s.textbook(code.textbookId());var participant=s.participant(code.participantId());var codeHistory=s.history.values().stream().filter(h->h.codeId().equals(code.id())).sorted(Comparator.comparing(History::createdAt)).toList();return Map.of("code",code,"textbook",textbook,"participant",participant,"history",codeHistory);}
     @PostMapping("/generate") List<MarkingCode> generate(@RequestParam UUID participantId,@RequestParam UUID textbookId,@RequestParam @Min(1) int quantity,@RequestHeader("Authorization") String authorization){User u=s.requestUser(authorization);if(!s.owns(u,participantId))throw s.error("FORBIDDEN","Оператор может формировать КМ только для своего участника",HttpStatus.FORBIDDEN);return s.generate(participantId,textbookId,quantity);}
     @PostMapping("/{id}/apply") MarkingCode apply(@PathVariable UUID id,@RequestHeader("Authorization") String authorization){
         User u=s.requestUser(authorization); MarkingCode c=s.code(id);
