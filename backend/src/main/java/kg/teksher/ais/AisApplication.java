@@ -7,10 +7,16 @@ import com.google.zxing.datamatrix.DataMatrixWriter;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.annotation.PostConstruct;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
@@ -37,8 +43,42 @@ record Balance(BigDecimal balance,BigDecimal reservedBalance,BigDecimal availabl
 record Aggregate(UUID id,String sscc,List<UUID> codeIds,String status,OffsetDateTime createdAt){}
 
 class AisException extends RuntimeException {
+
     final String code; final HttpStatus status;
     AisException(String code,String message,HttpStatus status){super(message);this.code=code;this.status=status;}
+}
+
+class AuthFilter extends OncePerRequestFilter {
+    private final AisService s;
+    AuthFilter(AisService s){this.s=s;}
+    @Override protected void doFilterInternal(HttpServletRequest req,HttpServletResponse res,FilterChain chain)throws ServletException,java.io.IOException{
+        String path=req.getRequestURI(), method=req.getMethod();
+        if(!path.startsWith("/api/") || path.equals("/api/auth/login")){chain.doFilter(req,res);return;}
+        String h=req.getHeader("Authorization");
+        if(h==null || !h.startsWith("Bearer ")){res.setStatus(401);res.setContentType("application/json");res.getWriter().write("{"code":"UNAUTHORIZED","message":"Требуется авторизация"}");return;}
+        try{
+            User u=s.currentUser(h.substring(7));
+            req.setAttribute("currentUser",u);
+            if(!allowed(u,method,path)){
+                res.setStatus(403);res.setContentType("application/json");res.getWriter().write("{"code":"FORBIDDEN","message":"Недостаточно прав для операции"}");return;
+            }
+            chain.doFilter(req,res);
+        }catch(AisException e){res.setStatus(e.status.value());res.setContentType("application/json");res.getWriter().write("{"code":""+e.code+"","message":""+e.getMessage()+""}");}
+    }
+    private boolean allowed(User u,String method,String path){
+        if(u.role().equals("ADMIN"))return true;
+        if(u.role().equals("OPERATOR")){
+            if(method.equals("GET"))return true;
+            if(method.equals("POST") && (
+                path.equals("/api/textbooks") ||
+                path.equals("/api/code-orders") ||
+                path.equals("/api/marking-codes/generate") ||
+                path.matches("/api/marking-codes/[^/]+/(apply|circulate|withdraw)") ||
+                path.matches("/api/operations/(marking|introduction|withdrawal)")
+            ))return true;
+        }
+        return false;
+    }
 }
 
 @RestControllerAdvice
@@ -65,6 +105,36 @@ class AisService {
     final Map<UUID,BigDecimal> reserved=new ConcurrentHashMap<>();
     final Map<UUID,Aggregate> aggregates=new ConcurrentHashMap<>();
     final Map<String,UUID> gtins=new ConcurrentHashMap<>();
+    final Map<UUID,String> passwords=new ConcurrentHashMap<>();
+    final Map<String,UUID> sessions=new ConcurrentHashMap<>();
+
+    @PostConstruct
+    void seedUsers(){
+        if(users.isEmpty()){
+            var now=OffsetDateTime.now();
+            UUID adminId=UUID.randomUUID();
+            users.put(adminId,new User(adminId,"Администратор AIS","admin",null,"ADMIN","ACTIVE",now));
+            passwords.put(adminId,"admin");
+            UUID operatorId=UUID.randomUUID();
+            users.put(operatorId,new User(operatorId,"Оператор AIS","operator",null,"OPERATOR","ACTIVE",now));
+            passwords.put(operatorId,"operator");
+        }
+    }
+
+    String login(String login,String password){
+        for(var e:users.entrySet()){
+            var u=e.getValue();
+            if(u.login().equals(login) && passwords.getOrDefault(e.getKey(),"").equals(password) && u.status().equals("ACTIVE")){
+                String token=UUID.randomUUID().toString();sessions.put(token,e.getKey());return token;
+            }
+        }
+        throw error("INVALID_CREDENTIALS","Неверный логин или пароль",HttpStatus.UNAUTHORIZED);
+    }
+    User currentUser(String token){
+        UUID id=sessions.get(token);
+        if(id==null)throw error("UNAUTHORIZED","Требуется авторизация",HttpStatus.UNAUTHORIZED);
+        return users.get(id);
+    }
 
     AisException error(String c,String m,HttpStatus s){return new AisException(c,m,s);}
     Participant participant(UUID id){var p=participants.get(id);if(p==null)throw error("PARTICIPANT_NOT_FOUND","Участник не найден",HttpStatus.NOT_FOUND);return p;}
@@ -211,9 +281,18 @@ class HistoryApi {
 @RestController @RequestMapping("/api/users")
 class UsersApi {
     final AisService s;UsersApi(AisService s){this.s=s;}
-    record Req(@NotBlank String fullName,@NotBlank String login,UUID participantId,@NotBlank String role){}
+    record Req(@NotBlank String fullName,@NotBlank String login,@NotBlank String password,UUID participantId,@NotBlank String role){}
     @GetMapping List<User> all(){return new ArrayList<>(s.users.values());}
-    @PostMapping User create(@Valid @RequestBody Req r){UUID id=UUID.randomUUID();var u=new User(id,r.fullName(),r.login(),r.participantId(),r.role(),"ACTIVE",OffsetDateTime.now());s.users.put(id,u);return u;}
+    @PostMapping User create(@Valid @RequestBody Req r){if(s.users.values().stream().anyMatch(u->u.login().equals(r.login())))throw s.error("LOGIN_ALREADY_EXISTS","Логин уже используется",HttpStatus.CONFLICT);UUID id=UUID.randomUUID();var u=new User(id,r.fullName(),r.login(),r.participantId(),r.role(),"ACTIVE",OffsetDateTime.now());s.users.put(id,u);s.passwords.put(id,r.password());return u;}
+}
+
+@RestController @RequestMapping("/api/auth")
+class AuthApi {
+    final AisService s; AuthApi(AisService s){this.s=s;}
+    record Req(@NotBlank String login,@NotBlank String password){}
+    record Res(String token,User user){}
+    @PostMapping("/login") Res login(@Valid @RequestBody Req r){String token=s.login(r.login(),r.password());return new Res(token,s.currentUser(token));}
+    @GetMapping("/me") User me(@RequestHeader("Authorization") String authorization){if(!authorization.startsWith("Bearer "))throw s.error("UNAUTHORIZED","Требуется авторизация",HttpStatus.UNAUTHORIZED);return s.currentUser(authorization.substring(7));}
 }
 
 @RestController
