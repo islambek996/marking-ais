@@ -1,6 +1,6 @@
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
-  "http://localhost:8080";
+  "http://" + window.location.hostname + ":8080";
 
 export async function lookupCode(gtin, serial) {
   const url = new URL(API_BASE + "/api/public/marking-codes/lookup");
