@@ -54,7 +54,7 @@ class AuthFilter extends OncePerRequestFilter {
     AuthFilter(AisService s){this.s=s;}
     @Override protected void doFilterInternal(HttpServletRequest req,HttpServletResponse res,FilterChain chain)throws ServletException,java.io.IOException{
         String path=req.getRequestURI(), method=req.getMethod();
-        if(!path.startsWith("/api/") || path.equals("/api/auth/login") || (method.equals("GET") && path.equals("/api/public/marking-codes/lookup"))){chain.doFilter(req,res);return;}
+        if(!path.startsWith("/api/") || path.equals("/api/auth/login") || (method.equals("GET") && path.equals("/api/marking-codes/lookup"))){chain.doFilter(req,res);return;}
         String h=req.getHeader("Authorization");
         if(h==null || !h.startsWith("Bearer ")){res.setStatus(401);res.setContentType("application/json");res.getWriter().write("{\"code\":\"UNAUTHORIZED\",\"message\":\"Требуется авторизация\"}");return;}
         try{
