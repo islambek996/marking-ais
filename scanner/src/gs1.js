@@ -32,6 +32,6 @@ export function parseGs1(value = "") {
     }
   }
 
-  result.valid = /^\\d{14}$/.test(result.gtin) && result.serial.length > 0;
+  result.valid = /^\d{14}$/.test(result.gtin) && result.serial.length > 0;
   return result;
 }
