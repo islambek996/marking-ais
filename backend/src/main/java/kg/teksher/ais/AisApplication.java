@@ -68,6 +68,7 @@ class AuthFilter extends OncePerRequestFilter {
             res.setStatus(e.status.value());res.setContentType("application/json");
             res.getWriter().write("{\"code\":\""+e.code+"\",\"message\":\""+e.getMessage().replace("\"","\\\"")+"\"}");
         }
+    }
     private boolean allowed(User u,String method,String path){
         if(u.role().equals("ADMIN"))return true;
         if(u.role().equals("OPERATOR")){
