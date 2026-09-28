@@ -45,7 +45,38 @@ function operations(){const rows=state.operations.map(x=>`<tr><td>${esc(x.type)}
 function documents(){const rows=state.documents.map(x=>`<tr><td>${esc(x.number)}</td><td>${esc(x.type)}</td><td>${status(x.status)}</td><td>${esc(x.createdAt)}</td></tr>`).join("");$("content").innerHTML=panel("Документы",table(["Номер","Тип","Статус","Дата"],rows))}
 async function finance(){if(state.me.role!=="ADMIN"){$("content").innerHTML=panel("Финансы",empty("Раздел доступен только администратору"));return;}const rows=await Promise.all(state.participants.map(async p=>{try{const b=await api("/api/billing/balance/"+p.id);return `<tr><td>${esc(p.name)}</td><td>${b.balance} KGS</td><td>${b.reservedBalance} KGS</td><td>${b.availableBalance} KGS</td><td>${state.me.role==="ADMIN"?`<button class="small" onclick="deposit('${p.id}')">Пополнить</button>`:""}</td></tr>`}catch{return""}}));$("content").innerHTML=panel("Финансы участников",table(["Участник","Баланс","Зарезервировано","Доступно",""],rows.join("")))}
 function history(){const rows=state.history.map(x=>`<tr><td>${esc(x.operation)}</td><td>${esc(x.oldStatus)}</td><td>${esc(x.newStatus)}</td><td>${esc(x.codeId)}</td><td>${esc(x.createdAt)}</td></tr>`).join("");$("content").innerHTML=panel("История изменений кодов",table(["Операция","Было","Стало","Код","Дата"],rows))}
-function settings(){let users="";if(state.me.role==="ADMIN"){const rows=state.users.map(u=>`<tr><td>${esc(u.fullName)}</td><td>${esc(u.login)}</td><td>${status(u.role)}</td><td>${status(u.status)}</td></tr>`).join("");users=panel("Пользователи и роли",`<form id="userForm" class="form"><input name="fullName" placeholder="ФИО *" required><input name="login" placeholder="Логин *" required><input name="password" type="password" placeholder="Пароль *" required><select name="role"><option value="OPERATOR">Оператор</option><option value="PARTICIPANT">Участник</option><option value="ADMIN">Администратор</option></select><select name="participantId"><option value="">Привязать к участнику</option>${opts(state.participants)}</select><button class="primary">Создать пользователя</button></form>`+table(["ФИО","Логин","Роль","Статус"],rows));}$("content").innerHTML=panel("Моя сессия",`<div class="session"><b>${esc(state.me.fullName)}</b><span>${status(state.me.role)}</span><button class="small danger" onclick="logout()">Выйти</button></div>`)+users+panel("Параметры MVP",`<div class="settings"><div><b>Продуктовая группа</b><p>Учебники</p></div><div><b>Хранилище</b><p>In-Memory MVP</p></div><div><b>Стоимость КМ</b><p>1,00 KGS за код</p></div><div><b>DataMatrix</b><p>GS1 DataMatrix ECC200</p></div></div>`);if($("userForm"))formSubmit("userForm",async f=>{const o=Object.fromEntries(f.entries());await api("/api/users",{method:"POST",body:JSON.stringify(o))})}
+function settings(){
+  let users="";
+  if(state.me.role==="ADMIN"){
+    const rows=state.users.map(u=>`<tr><td>${esc(u.fullName)}</td><td>${esc(u.login)}</td><td>${status(u.role)}</td><td>${status(u.status)}</td></tr>`).join("");
+    users=panel("Пользователи и роли",
+      `<form id="userForm" class="form">
+        <input name="fullName" placeholder="ФИО *" required>
+        <input name="login" placeholder="Логин *" required>
+        <input name="password" type="password" placeholder="Пароль *" required>
+        <select name="role"><option value="OPERATOR">Оператор</option><option value="PARTICIPANT">Участник</option><option value="ADMIN">Администратор</option></select>
+        <select name="participantId"><option value="">Привязать к участнику</option>${opts(state.participants)}</select>
+        <button class="primary">Создать пользователя</button>
+      </form>` + table(["ФИО","Логин","Роль","Статус"],rows)
+    );
+  }
+  $("content").innerHTML =
+    panel("Моя сессия", `<div class="session"><b>${esc(state.me.fullName)}</b><span>${status(state.me.role)}</span><button class="small danger" onclick="logout()">Выйти</button></div>`) +
+    users +
+    panel("Параметры MVP", `<div class="settings">
+      <div><b>Продуктовая группа</b><p>Учебники</p></div>
+      <div><b>Хранилище</b><p>In-Memory MVP</p></div>
+      <div><b>Стоимость КМ</b><p>1,00 KGS за код</p></div>
+      <div><b>DataMatrix</b><p>GS1 DataMatrix ECC200</p></div>
+    </div>`);
+  if($("userForm")){
+    formSubmit("userForm",async f=>{
+      const o=Object.fromEntries(f.entries());
+      if(!o.participantId) delete o.participantId;
+      await api("/api/users",{method:"POST",body:JSON.stringify(o)});
+    });
+  }
+}
 function logout(){localStorage.removeItem("ais_token");location.reload()}
 const pages={dashboard:["АИС маркировки учебников","Рабочая панель MVP",dashboard],participants:["Участники","Управление участниками оборота",participants],textbooks:["Учебники","Карточки учебников",textbooks],codes:["Коды маркировки","Формирование, нанесение и печать DataMatrix",codes],orders:["Заказы КМ","Заказ и стоимость кодов",orders],operations:["Операции","Нанесение, ввод и вывод из оборота",operations],documents:["Документы","Документы операций",documents],finance:["Финансы","Баланс и резервирование",finance],history:["История","Аудит изменений",history],settings:["Настройки","Пользователи, роли и параметры",settings]};
 async function loadPage(){clearError();await refreshData();const [title,subtitle,render]=pages[state.page];$("pageTitle").textContent=title;$("pageSubtitle").textContent=subtitle;await render()}
