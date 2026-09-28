@@ -1,9 +1,27 @@
 import { useEffect, useRef, useState } from "react";
-import { BrowserCodeReader, BrowserDatamatrixCodeReader } from "@zxing/browser";
+import { readBarcodes } from "zxing-wasm/reader";
 import { lookupCode } from "./api";
 import { parseGs1 } from "./gs1";
 
-const reader = new BrowserDatamatrixCodeReader();
+const READER_OPTIONS = {
+  formats: ["DataMatrix"],
+  maxNumberOfSymbols: 1,
+  tryHarder: true,
+  tryRotate: true,
+  tryInvert: true,
+  tryDenoise: true,
+  textMode: "Escaped"
+};
+
+async function decodeImageData(imageData) {
+  const results = await readBarcodes(imageData, READER_OPTIONS);
+  return results.find(result => result.text)?.text || "";
+}
+
+async function decodeFile(file) {
+  const results = await readBarcodes(file, READER_OPTIONS);
+  return results.find(result => result.text)?.text || "";
+}
 
 function statusLabel(status) {
   const labels = {
@@ -35,7 +53,7 @@ function App() {
   useEffect(() => {
     let active = true;
 
-    BrowserCodeReader.listVideoInputDevices()
+    navigator.mediaDevices.enumerateDevices().then(all => all.filter(device => device.kind === "videoinput"))
       .then(list => {
         if (!active) return;
         setDevices(list);
@@ -92,13 +110,12 @@ function App() {
               deviceId: { exact: deviceId },
               width: { ideal: 1920 },
               height: { ideal: 1080 },
-              focusMode: "continuous"
+              facingMode: { ideal: "environment" }
             }
           : {
               facingMode: { ideal: "environment" },
               width: { ideal: 1920 },
-              height: { ideal: 1080 },
-              focusMode: "continuous"
+              height: { ideal: 1080 }
             }
       };
 
@@ -116,40 +133,33 @@ function App() {
         scanBusyRef.current = true;
         try {
           const video = videoRef.current;
-          const size = Math.min(video.videoWidth, video.videoHeight);
-          if (!size) return;
+          if (!video.videoWidth || !video.videoHeight) return;
 
           const canvas = document.createElement("canvas");
-          canvas.width = size;
-          canvas.height = size;
+          const crop = Math.min(video.videoWidth, video.videoHeight);
+          const output = Math.min(crop, 1000);
+          canvas.width = output;
+          canvas.height = output;
 
-          const sx = (video.videoWidth - size) / 2;
-          const sy = (video.videoHeight - size) / 2;
-          canvas.getContext("2d", { willReadFrequently: true }).drawImage(
-            video,
-            sx,
-            sy,
-            size,
-            size,
-            0,
-            0,
-            size,
-            size
-          );
+          const sx = (video.videoWidth - crop) / 2;
+          const sy = (video.videoHeight - crop) / 2;
 
-          try {
-            const result = reader.decodeFromCanvas(canvas);
-            if (result) {
-              stopScanner();
-              await checkRaw(result.getText());
-            }
-          } catch {
-            // Кадр без распознанного кода – продолжаем сканирование.
+          const context = canvas.getContext("2d", { willReadFrequently: true });
+          context.drawImage(video, sx, sy, crop, crop, 0, 0, output, output);
+
+          const imageData = context.getImageData(0, 0, output, output);
+          const value = await decodeImageData(imageData);
+
+          if (value) {
+            stopScanner();
+            await checkRaw(value);
           }
+        } catch {
+          // Кадр без распознанного DataMatrix – продолжаем.
         } finally {
           scanBusyRef.current = false;
         }
-      }, 180);
+      }, 500);
     } catch (e) {
       setScanning(false);
       setMessage("Камера недоступна");
@@ -181,30 +191,21 @@ function App() {
     if (!file) return;
 
     setError("");
+    setData(null);
     setMessage("Распознаём фотографию…");
 
     try {
-      const url = URL.createObjectURL(file);
-      const image = new Image();
-      image.onload = async () => {
-        try {
-          const result = reader.decodeFromImageElement(image);
-          await checkRaw(result.getText());
-        } catch {
-          setError("Не удалось распознать DataMatrix на фотографии.");
-        } finally {
-          URL.revokeObjectURL(url);
-          event.target.value = "";
-        }
-      };
-      image.onerror = () => {
-        URL.revokeObjectURL(url);
-        setError("Не удалось открыть фотографию.");
-        event.target.value = "";
-      };
-      image.src = url;
+      const value = await decodeFile(file);
+
+      if (!value) {
+        throw new Error("NO_CODE");
+      }
+
+      await checkRaw(value);
     } catch {
-      setError("Не удалось обработать фотографию.");
+      setError("Не удалось распознать DataMatrix на фотографии. Сделайте фото крупнее, без бликов и чтобы весь код был виден.");
+    } finally {
+      event.target.value = "";
     }
   }
 
