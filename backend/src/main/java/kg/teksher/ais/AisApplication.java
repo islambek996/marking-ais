@@ -110,6 +110,7 @@ class AisService {
     final Map<UUID,BigDecimal> balances=new ConcurrentHashMap<>();
     final Map<UUID,BigDecimal> reserved=new ConcurrentHashMap<>();
     final Map<UUID,Aggregate> aggregates=new ConcurrentHashMap<>();
+    final Map<UUID,UUID> codeBilling=new ConcurrentHashMap<>();
     final Map<String,UUID> gtins=new ConcurrentHashMap<>();
     final Map<UUID,String> passwords=new ConcurrentHashMap<>();
     final Map<String,UUID> sessions=new ConcurrentHashMap<>();
@@ -241,19 +242,20 @@ class CodesApi {
     @GetMapping List<MarkingCode> all(@RequestHeader("Authorization") String authorization){User u=s.requestUser(authorization);return s.codes.values().stream().filter(c->s.owns(u,c.participantId())).toList();}
     @GetMapping("/{id}") MarkingCode get(@PathVariable UUID id,@RequestHeader("Authorization") String authorization){var c=s.code(id);if(!s.owns(s.requestUser(authorization),c.participantId()))throw s.error("FORBIDDEN","Код принадлежит другому участнику",HttpStatus.FORBIDDEN);return c;}
     @PostMapping("/generate") List<MarkingCode> generate(@RequestParam UUID participantId,@RequestParam UUID textbookId,@RequestParam @Min(1) int quantity,@RequestHeader("Authorization") String authorization){User u=s.requestUser(authorization);if(!s.owns(u,participantId))throw s.error("FORBIDDEN","Оператор может формировать КМ только для своего участника",HttpStatus.FORBIDDEN);return s.generate(participantId,textbookId,quantity);}
-    @PostMapping("/{id}/apply") MarkingCode apply(@PathVariable UUID id){return s.transition(id,"APPLIED","MARKING");}
-    @PostMapping("/{id}/circulate") MarkingCode circulate(@PathVariable UUID id){return s.transition(id,"IN_CIRCULATION","INTRODUCTION");}
-    @PostMapping("/{id}/withdraw") MarkingCode withdraw(@PathVariable UUID id){return s.transition(id,"WITHDRAWN","WITHDRAWAL");}
-}
-
-@RestController @RequestMapping("/api/code-orders")
-class OrdersApi {
-    final AisService s; OrdersApi(AisService s){this.s=s;}
-    record Req(UUID participantId,UUID textbookId,@Min(1) int quantity){}
-    @GetMapping List<CodeOrder> all(@RequestHeader("Authorization") String authorization){User u=s.requestUser(authorization);return s.orders.values().stream().filter(o->s.owns(u,o.participantId())).toList();}
-    @PostMapping CodeOrder create(@Valid @RequestBody Req r,@RequestHeader("Authorization") String authorization){
-        User u=s.requestUser(authorization);if(!s.owns(u,r.participantId()))throw s.error("FORBIDDEN","Оператор может создавать заказы только для своего участника",HttpStatus.FORBIDDEN);var t=s.textbook(r.textbookId());s.participant(r.participantId());var amount=s.price(r.quantity());var b=s.reserve(r.participantId(),"MARKING_CODES_GENERATION",amount);UUID id=UUID.randomUUID();var now=OffsetDateTime.now();var processing=new CodeOrder(id,r.participantId(),r.textbookId(),t.gtin(),r.quantity(),amount,b.id(),"PROCESSING",now);s.orders.put(id,processing);
-        try{s.generate(r.participantId(),r.textbookId(),r.quantity());s.capture(b.id());var done=new CodeOrder(id,r.participantId(),r.textbookId(),t.gtin(),r.quantity(),amount,b.id(),"COMPLETED",now);s.orders.put(id,done);return done;}catch(RuntimeException e){s.release(b.id());var failed=new CodeOrder(id,r.participantId(),r.textbookId(),t.gtin(),r.quantity(),amount,b.id(),"FAILED",now);s.orders.put(id,failed);throw e;}
+    @PostMapping("/{id}/apply") MarkingCode apply(@PathVariable UUID id,@RequestHeader("Authorization") String authorization){
+        User u=s.requestUser(authorization); MarkingCode c=s.code(id);
+        if(!s.owns(u,c.participantId()))throw s.error("FORBIDDEN","Нельзя наносить код другого участника",HttpStatus.FORBIDDEN);
+        if(!c.status().equals("EMITTED"))throw s.error("INVALID_STATUS_TRANSITION","Нанести можно только код со статусом EMITTED",HttpStatus.BAD_REQUEST);
+        if(s.codeBilling.containsKey(id))return s.transition(id,"APPLIED","MARKING");
+        BillingOperation bill=s.reserve(c.participantId(),"MARKING",BigDecimal.ONE);
+        try{MarkingCode result=s.transition(id,"APPLIED","MARKING");s.capture(bill.id());s.codeBilling.put(id,bill.id());return result;}
+        catch(RuntimeException e){s.release(bill.id());throw e;}
+    }
+    @PostMapping("/{id}/circulate") MarkingCode circulate(@PathVariable UUID id,@RequestHeader("Authorization") String authorization){
+        User u=s.requestUser(authorization);MarkingCode c=s.code(id);if(!s.owns(u,c.participantId()))throw s.error("FORBIDDEN","Нельзя вводить в оборот чужой код",HttpStatus.FORBIDDEN);return s.transition(id,"IN_CIRCULATION","INTRODUCTION");
+    }
+    @PostMapping("/{id}/withdraw") MarkingCode withdraw(@PathVariable UUID id,@RequestHeader("Authorization") String authorization){
+        User u=s.requestUser(authorization);MarkingCode c=s.code(id);if(!s.owns(u,c.participantId()))throw s.error("FORBIDDEN","Нельзя выводить чужой код",HttpStatus.FORBIDDEN);return s.transition(id,"WITHDRAWN","WITHDRAWAL");
     }
 }
 
