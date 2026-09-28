@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } from "@zxing/browser";
+import { BrowserMultiFormatReader } from "@zxing/browser";
 import { lookupCode } from "./api";
 import { parseGs1 } from "./gs1";
 
-const hints = new Map();
-hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.DATA_MATRIX]);
-
-const reader = new BrowserMultiFormatReader(hints);
+const reader = new BrowserMultiFormatReader();
 
 function statusLabel(status) {
   const labels = {
