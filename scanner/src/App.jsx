@@ -99,7 +99,7 @@ function App() {
   }
 
   useEffect(() => {
-    if (!data || !parsed?.valid) return;
+    if (!parsed?.valid) return;
 
     let active = true;
 
@@ -121,7 +121,7 @@ function App() {
       active = false;
       clearInterval(timer);
     };
-  }, [data, parsed]);
+  }, [parsed?.valid, parsed?.gtin, parsed?.serial]);
 
   async function startScanner() {
     setError("");
