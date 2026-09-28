@@ -259,6 +259,38 @@ class CodesApi {
     }
 }
 
+@RestController @RequestMapping("/api/code-orders")
+class OrdersApi {
+    final AisService s; OrdersApi(AisService s){this.s=s;}
+    record Req(UUID participantId,UUID textbookId,@Min(1) int quantity){}
+    @GetMapping List<CodeOrder> all(@RequestHeader("Authorization") String authorization){
+        User u=s.requestUser(authorization);
+        return s.orders.values().stream().filter(o->s.owns(u,o.participantId())).toList();
+    }
+    @PostMapping CodeOrder create(@Valid @RequestBody Req r,@RequestHeader("Authorization") String authorization){
+        User u=s.requestUser(authorization);
+        if(!s.owns(u,r.participantId()))throw s.error("FORBIDDEN","Нельзя создать заказ для другого участника",HttpStatus.FORBIDDEN);
+        var t=s.textbook(r.textbookId());
+        if(!t.participantId().equals(r.participantId()))throw s.error("PARTICIPANT_MISMATCH","Учебник принадлежит другому участнику",HttpStatus.BAD_REQUEST);
+        BigDecimal amount=s.price(r.quantity());
+        BillingOperation bill=s.reserve(r.participantId(),"CODE_ORDER",amount);
+        UUID id=UUID.randomUUID();var now=OffsetDateTime.now();
+        try{
+            var generated=s.generate(r.participantId(),r.textbookId(),r.quantity());
+            for(var code:generated)s.codeBilling.put(code.id(),bill.id());
+            s.capture(bill.id());
+            var done=new CodeOrder(id,r.participantId(),r.textbookId(),t.gtin(),r.quantity(),amount,bill.id(),"COMPLETED",now);
+            s.orders.put(id,done);
+            return done;
+        }catch(RuntimeException e){
+            s.release(bill.id());
+            var failed=new CodeOrder(id,r.participantId(),r.textbookId(),t.gtin(),r.quantity(),amount,bill.id(),"FAILED",now);
+            s.orders.put(id,failed);
+            throw e;
+        }
+    }
+}
+
 @RestController @RequestMapping("/api/billing")
 class BillingApi {
     final AisService s; BillingApi(AisService s){this.s=s;}
