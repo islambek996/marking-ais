@@ -49,6 +49,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [manual, setManual] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -87,6 +88,7 @@ function App() {
     try {
       const response = await lookupCode(result.gtin, result.serial);
       setData(response);
+      setLastUpdated(new Date());
       setMessage("Код успешно проверен");
     } catch (e) {
       setError(e.message || "Ошибка проверки кода");
@@ -95,6 +97,31 @@ function App() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!data || !parsed?.valid) return;
+
+    let active = true;
+
+    const refresh = async () => {
+      try {
+        const response = await lookupCode(parsed.gtin, parsed.serial);
+        if (!active) return;
+
+        setData(response);
+        setLastUpdated(new Date());
+      } catch {
+        // Временная ошибка сети не скрывает уже загруженные данные.
+      }
+    };
+
+    const timer = window.setInterval(refresh, 2000);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [data, parsed]);
 
   async function startScanner() {
     setError("");
@@ -354,6 +381,11 @@ function App() {
                 <h2>Информация о коде</h2>
               </div>
               <span className="pill success">Код найден</span>
+            </div>
+
+            <div className="live-update">
+              <span className="status-dot" />
+              Статус обновляется автоматически · {lastUpdated ? `обновлено ${formatDate(lastUpdated)}` : "подключение…"}
             </div>
 
             <div className="status-banner">
