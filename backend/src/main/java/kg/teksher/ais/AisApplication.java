@@ -56,16 +56,18 @@ class AuthFilter extends OncePerRequestFilter {
         String path=req.getRequestURI(), method=req.getMethod();
         if(!path.startsWith("/api/") || path.equals("/api/auth/login")){chain.doFilter(req,res);return;}
         String h=req.getHeader("Authorization");
-        if(h==null || !h.startsWith("Bearer ")){res.setStatus(401);res.setContentType("application/json");res.getWriter().write("{\\"code\\":\\"UNAUTHORIZED\\",\\"message\\":\\"Требуется авторизация\\"}");return;}
+        if(h==null || !h.startsWith("Bearer ")){res.setStatus(401);res.setContentType("application/json");res.getWriter().write("{\"code\":\"UNAUTHORIZED\",\"message\":\"Требуется авторизация\"}");return;}
         try{
             User u=s.currentUser(h.substring(7));
             req.setAttribute("currentUser",u);
             if(!allowed(u,method,path)){
-                res.setStatus(403);res.setContentType("application/json");res.getWriter().write("{\\"code\\":\\"FORBIDDEN\\",\\"message\\":\\"Недостаточно прав для операции\\"}");return;
+                res.setStatus(403);res.setContentType("application/json");res.getWriter().write("{\"code\":\"FORBIDDEN\",\"message\":\"Недостаточно прав для операции\"}");return;
             }
             chain.doFilter(req,res);
-        }catch(AisException e){res.setStatus(e.status.value());res.setContentType("application/json");res.getWriter().write("{\\"code\\":\\""+e.code+"\\",\\"message\\":\\""+e.getMessage().replace("\\"","\\\\\\"")+"\\"}");}
-    }
+        }catch(AisException e){
+            res.setStatus(e.status.value());res.setContentType("application/json");
+            res.getWriter().write("{\"code\":\""+e.code+"\",\"message\":\""+e.getMessage().replace("\"","\\\"")+"\"}");
+        }
     private boolean allowed(User u,String method,String path){
         if(u.role().equals("ADMIN"))return true;
         if(u.role().equals("OPERATOR")){
