@@ -48,6 +48,7 @@ class AisException extends RuntimeException {
     AisException(String code,String message,HttpStatus status){super(message);this.code=code;this.status=status;}
 }
 
+@org.springframework.stereotype.Component
 class AuthFilter extends OncePerRequestFilter {
     private final AisService s;
     AuthFilter(AisService s){this.s=s;}
