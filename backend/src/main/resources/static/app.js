@@ -43,7 +43,33 @@ async function changeCode(id,a){try{await api("/api/marking-codes/"+id+"/"+a,{me
 function orders(){const rows=state.orders.map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.gtin)}</td><td>${x.quantity}</td><td>${x.amount} KGS</td><td>${status(x.status)}</td></tr>`).join("");const form=state.me.role==="ADMIN"||state.me.role==="USER" || state.me.role==="PARTICIPANT"?`<form id="orderForm" class="form"><input type="hidden" name="participantId" value="${state.me.role==="USER" || state.me.role==="PARTICIPANT"?(state.me.participantId||""):""}">${state.me.role==="ADMIN"?`<select name="participantId" required><option value="">Участник *</option>${opts(state.participants)}</select>`:""}<select name="textbookId" required><option value="">Учебник *</option>${opts(state.textbooks,"title")}</select><input name="quantity" type="number" min="1" value="1" required><button class="primary">Создать заказ КМ</button></form>`:empty("Создание заказов недоступно для этой роли");$("content").innerHTML=`<div class="grid2">${panel("Новый заказ КМ",form)}${panel("Заказы",table(["ID","GTIN","Количество","Сумма","Статус"],rows))}</div>`;if($("orderForm"))formSubmit("orderForm",async f=>{const q=Object.fromEntries(f.entries());await api("/api/code-orders",{method:"POST",body:JSON.stringify({participantId:q.participantId,textbookId:q.textbookId,quantity:Number(q.quantity)})})})}
 function operations(){const rows=state.operations.map(x=>`<tr><td>${esc(x.type)}</td><td>${x.quantity}</td><td>${status(x.status)}</td><td>${esc(x.reason)}</td><td>${esc(x.createdAt)}</td></tr>`).join("");$("content").innerHTML=panel("История операций",table(["Тип","Количество","Статус","Причина","Дата"],rows))}
 function documents(){const rows=state.documents.map(x=>`<tr><td>${esc(x.number)}</td><td>${esc(x.type)}</td><td>${status(x.status)}</td><td>${esc(x.createdAt)}</td></tr>`).join("");$("content").innerHTML=panel("Документы",table(["Номер","Тип","Статус","Дата"],rows))}
-async function finance(){if(state.me.role!=="ADMIN"){$("content").innerHTML=panel("Финансы",empty("Раздел доступен только администратору"));return;}const rows=await Promise.all(state.participants.map(async p=>{try{const b=await api("/api/billing/balance/"+p.id);return `<tr><td>${esc(p.name)}</td><td>${b.balance} KGS</td><td>${b.reservedBalance} KGS</td><td>${b.availableBalance} KGS</td><td>${state.me.role==="ADMIN"?`<button class="small" onclick="deposit('${p.id}')">Пополнить</button>`:""}</td></tr>`}catch{return""}}));$("content").innerHTML=panel("Финансы участников",table(["Участник","Баланс","Зарезервировано","Доступно",""],rows.join("")))}
+async function finance(){
+  if(state.me.role==="ADMIN"){
+    const rows=await Promise.all(state.participants.map(async p=>{
+      try{
+        const b=await api("/api/billing/balance/"+p.id);
+        return `<tr><td>${esc(p.name)}</td><td>${b.balance} KGS</td><td>${b.reservedBalance} KGS</td><td>${b.availableBalance} KGS</td><td><button class="small" onclick="deposit('${p.id}')">Пополнить</button></td></tr>`;
+      }catch{return ""}
+    }));
+    $("content").innerHTML=panel("Финансы участников",table(["Участник","Баланс","Зарезервировано","Доступно",""],rows.join("")));
+    return;
+  }
+  if(!state.me.participantId){
+    $("content").innerHTML=panel("Финансы",empty("Аккаунт не привязан к участнику"));
+    return;
+  }
+  const b=await api("/api/billing/balance/"+state.me.participantId);
+  $("content").innerHTML=panel("Мой баланс",`
+    <div class="cards">
+      <div class="card"><span>Баланс</span><strong>${b.balance} KGS</strong></div>
+      <div class="card"><span>Зарезервировано</span><strong>${b.reservedBalance} KGS</strong></div>
+      <div class="card"><span>Доступно</span><strong>${b.availableBalance} KGS</strong></div>
+    </div>
+    <div class="settings">
+      <div><b>Участник</b><p>${esc(state.participants[0]?.name||"")}</p></div>
+      <div><b>Стоимость нанесения</b><p>1,00 KGS за код</p></div>
+    </div>`);
+}
 function history(){const rows=state.history.map(x=>`<tr><td>${esc(x.operation)}</td><td>${esc(x.oldStatus)}</td><td>${esc(x.newStatus)}</td><td>${esc(x.codeId)}</td><td>${esc(x.createdAt)}</td></tr>`).join("");$("content").innerHTML=panel("История изменений кодов",table(["Операция","Было","Стало","Код","Дата"],rows))}
 function settings(){
   let users="";
