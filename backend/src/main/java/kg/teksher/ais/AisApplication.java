@@ -72,9 +72,10 @@ class AuthFilter extends OncePerRequestFilter {
     private boolean allowed(User u,String method,String path){
         if(u.role().equals("ADMIN"))return true;
         if(u.role().equals("OPERATOR")){
-            if(method.equals("GET"))return true;
+            if(method.equals("GET") && !path.startsWith("/api/participants") && !path.equals("/api/users"))return true;
             if(method.equals("POST") && (
                 path.equals("/api/textbooks") ||
+                path.matches("/api/textbooks/[^/]+/publish") ||
                 path.equals("/api/code-orders") ||
                 path.equals("/api/marking-codes/generate") ||
                 path.matches("/api/marking-codes/[^/]+/(apply|circulate|withdraw)") ||
@@ -139,6 +140,11 @@ class AisService {
         if(id==null)throw error("UNAUTHORIZED","Требуется авторизация",HttpStatus.UNAUTHORIZED);
         return users.get(id);
     }
+    User requestUser(String authorization){
+        if(authorization==null || !authorization.startsWith("Bearer "))throw error("UNAUTHORIZED","Требуется авторизация",HttpStatus.UNAUTHORIZED);
+        return currentUser(authorization.substring(7));
+    }
+    boolean owns(User u, UUID participantId){return u.role().equals("ADMIN") || (u.participantId()!=null && u.participantId().equals(participantId));}
 
     AisException error(String c,String m,HttpStatus s){return new AisException(c,m,s);}
     Participant participant(UUID id){var p=participants.get(id);if(p==null)throw error("PARTICIPANT_NOT_FOUND","Участник не найден",HttpStatus.NOT_FOUND);return p;}
@@ -206,17 +212,22 @@ class ProductGroupsApi {
 class TextbooksApi {
     final AisService s; TextbooksApi(AisService s){this.s=s;}
     record Req(UUID participantId,@NotBlank String gtin,@NotBlank String title,String fullTitle,@NotBlank String author,@NotBlank String schoolClass,@NotBlank String subject,@NotBlank String publisher,Integer year,@NotBlank String language,@NotBlank String isbn,Integer printRun,String ageCategory,String countryOfProduction,String manufacturer,String description){}
-    @GetMapping List<Textbook> all(){return new ArrayList<>(s.textbooks.values());}
-    @GetMapping("/{id}") Textbook get(@PathVariable UUID id){return s.textbook(id);}
+    @GetMapping List<Textbook> all(@RequestHeader("Authorization") String authorization){
+        User u=s.requestUser(authorization);
+        return s.textbooks.values().stream().filter(t->s.owns(u,t.participantId())).toList();
+    }
+    @GetMapping("/{id}") Textbook get(@PathVariable UUID id,@RequestHeader("Authorization") String authorization){
+        var t=s.textbook(id);if(!s.owns(s.requestUser(authorization),t.participantId()))throw s.error("FORBIDDEN","Карточка принадлежит другому участнику",HttpStatus.FORBIDDEN);return t;
+    }
     @PostMapping Textbook create(@Valid @RequestBody Req r){if(!s.validGtin(r.gtin()))throw s.error("INVALID_GTIN","Некорректный GTIN",HttpStatus.BAD_REQUEST);if(s.gtins.containsKey(r.gtin()))throw s.error("GTIN_ALREADY_EXISTS","GTIN уже используется",HttpStatus.CONFLICT);if(r.participantId()!=null)s.participant(r.participantId());UUID id=UUID.randomUUID();s.gtins.put(r.gtin(),id);var now=OffsetDateTime.now();var t=new Textbook(id,r.participantId(),r.gtin(),r.title(),r.fullTitle(),r.author(),r.schoolClass(),r.subject(),r.publisher(),r.year(),r.language(),r.isbn(),r.printRun(),r.ageCategory(),r.countryOfProduction(),r.manufacturer(),r.description(),"DRAFT",now,now);s.textbooks.put(id,t);return t;}
-    @PostMapping("/{id}/publish") Textbook publish(@PathVariable UUID id){var t=s.textbook(id);var n=new Textbook(t.id(),t.participantId(),t.gtin(),t.title(),t.fullTitle(),t.author(),t.schoolClass(),t.subject(),t.publisher(),t.year(),t.language(),t.isbn(),t.printRun(),t.ageCategory(),t.countryOfProduction(),t.manufacturer(),t.description(),"PUBLISHED",t.createdAt(),OffsetDateTime.now());s.textbooks.put(id,n);return n;}
+    @PostMapping("/{id}/publish") Textbook publish(@PathVariable UUID id,@RequestHeader("Authorization") String authorization){var t=s.textbook(id);if(!s.owns(s.requestUser(authorization),t.participantId()))throw s.error("FORBIDDEN","Нельзя публиковать чужую карточку",HttpStatus.FORBIDDEN);var n=new Textbook(t.id(),t.participantId(),t.gtin(),t.title(),t.fullTitle(),t.author(),t.schoolClass(),t.subject(),t.publisher(),t.year(),t.language(),t.isbn(),t.printRun(),t.ageCategory(),t.countryOfProduction(),t.manufacturer(),t.description(),"PUBLISHED",t.createdAt(),OffsetDateTime.now());s.textbooks.put(id,n);return n;}
 }
 
 @RestController @RequestMapping("/api/marking-codes")
 class CodesApi {
     final AisService s; CodesApi(AisService s){this.s=s;}
-    @GetMapping List<MarkingCode> all(){return new ArrayList<>(s.codes.values());}
-    @GetMapping("/{id}") MarkingCode get(@PathVariable UUID id){return s.code(id);}
+    @GetMapping List<MarkingCode> all(@RequestHeader("Authorization") String authorization){User u=s.requestUser(authorization);return s.codes.values().stream().filter(c->s.owns(u,c.participantId())).toList();}
+    @GetMapping("/{id}") MarkingCode get(@PathVariable UUID id,@RequestHeader("Authorization") String authorization){var c=s.code(id);if(!s.owns(s.requestUser(authorization),c.participantId()))throw s.error("FORBIDDEN","Код принадлежит другому участнику",HttpStatus.FORBIDDEN);return c;}
     @PostMapping("/generate") List<MarkingCode> generate(@RequestParam UUID participantId,@RequestParam UUID textbookId,@RequestParam @Min(1) int quantity){return s.generate(participantId,textbookId,quantity);}
     @PostMapping("/{id}/apply") MarkingCode apply(@PathVariable UUID id){return s.transition(id,"APPLIED","MARKING");}
     @PostMapping("/{id}/circulate") MarkingCode circulate(@PathVariable UUID id){return s.transition(id,"IN_CIRCULATION","INTRODUCTION");}
@@ -227,7 +238,7 @@ class CodesApi {
 class OrdersApi {
     final AisService s; OrdersApi(AisService s){this.s=s;}
     record Req(UUID participantId,UUID textbookId,@Min(1) int quantity){}
-    @GetMapping List<CodeOrder> all(){return new ArrayList<>(s.orders.values());}
+    @GetMapping List<CodeOrder> all(@RequestHeader("Authorization") String authorization){User u=s.requestUser(authorization);return s.orders.values().stream().filter(o->s.owns(u,o.participantId())).toList();}
     @PostMapping CodeOrder create(@Valid @RequestBody Req r){
         var t=s.textbook(r.textbookId());s.participant(r.participantId());var amount=s.price(r.quantity());var b=s.reserve(r.participantId(),"MARKING_CODES_GENERATION",amount);UUID id=UUID.randomUUID();var now=OffsetDateTime.now();var processing=new CodeOrder(id,r.participantId(),r.textbookId(),t.gtin(),r.quantity(),amount,b.id(),"PROCESSING",now);s.orders.put(id,processing);
         try{s.generate(r.participantId(),r.textbookId(),r.quantity());s.capture(b.id());var done=new CodeOrder(id,r.participantId(),r.textbookId(),t.gtin(),r.quantity(),amount,b.id(),"COMPLETED",now);s.orders.put(id,done);return done;}catch(RuntimeException e){s.release(b.id());var failed=new CodeOrder(id,r.participantId(),r.textbookId(),t.gtin(),r.quantity(),amount,b.id(),"FAILED",now);s.orders.put(id,failed);throw e;}
@@ -250,7 +261,7 @@ class BillingApi {
 class OperationsApi {
     final AisService s;OperationsApi(AisService s){this.s=s;}
     record Req(UUID participantId,UUID textbookId,List<UUID> codeIds,String reason){}
-    @GetMapping List<Operation> all(){return new ArrayList<>(s.operations.values());}
+    @GetMapping List<Operation> all(@RequestHeader("Authorization") String authorization){User u=s.requestUser(authorization);return s.operations.values().stream().filter(o->s.owns(u,o.participantId())).toList();}
     @PostMapping("/marking") Operation marking(@Valid @RequestBody Req r){return execute("MARKING",r,"EMITTED","APPLIED");}
     @PostMapping("/introduction") Operation intro(@Valid @RequestBody Req r){return execute("INTRODUCTION",r,"APPLIED","IN_CIRCULATION");}
     @PostMapping("/withdrawal") Operation withdrawal(@Valid @RequestBody Req r){return execute("WITHDRAWAL",r,"IN_CIRCULATION","WITHDRAWN");}
@@ -273,13 +284,13 @@ class AggregationApi {
 @RestController @RequestMapping("/api/documents")
 class DocumentsApi {
     final AisService s;DocumentsApi(AisService s){this.s=s;}
-    @GetMapping List<Document> all(){return new ArrayList<>(s.documents.values());}
+    @GetMapping List<Document> all(@RequestHeader("Authorization") String authorization){User u=s.requestUser(authorization);return s.documents.values().stream().filter(d->s.owns(u,d.participantId())).toList();}
 }
 
 @RestController @RequestMapping("/api/history")
 class HistoryApi {
     final AisService s;HistoryApi(AisService s){this.s=s;}
-    @GetMapping List<History> all(){return new ArrayList<>(s.history.values());}
+    @GetMapping List<History> all(@RequestHeader("Authorization") String authorization){User u=s.requestUser(authorization);return s.history.values().stream().filter(h->s.owns(u,h.participantId())).toList();}
 }
 
 @RestController @RequestMapping("/api/users")
