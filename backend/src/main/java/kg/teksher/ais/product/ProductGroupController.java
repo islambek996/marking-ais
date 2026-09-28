@@ -1,5 +1,8 @@
 package kg.teksher.ais.product;
-import org.springframework.web.bind.annotation.*; import java.util.*;
-@RestController @RequestMapping("/api/product-groups") public class ProductGroupController{
- private final ProductGroupService service; public ProductGroupController(ProductGroupService service){this.service=service;} @GetMapping public List<ProductGroup> all(){return service.all();}
+
+/**
+ * Legacy controller retained for source compatibility.
+ * REST endpoints are provided by kg.teksher.ais.ProductGroupsApi.
+ */
+public class ProductGroupController {
 }
