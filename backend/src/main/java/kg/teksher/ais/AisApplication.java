@@ -71,7 +71,7 @@ class AuthFilter extends OncePerRequestFilter {
     }
     private boolean allowed(User u,String method,String path){
         if(u.role().equals("ADMIN"))return true;
-        if(u.role().equals("PARTICIPANT") || u.role().equals("USER")){
+        if(u.role().equals("USER")){
             if(method.equals("GET") && path.matches("/api/participants/[^/]+") && u.participantId()!=null && path.endsWith(u.participantId().toString()))return true;
             if(method.equals("GET") && !path.startsWith("/api/participants") && !path.equals("/api/users"))return true;
             if(method.equals("POST") && (
@@ -125,9 +125,6 @@ class AisService {
             UUID participantId=UUID.randomUUID();
             participants.put(participantId,new Participant(participantId,"00000000000000","Демо-участник","ОсОО","Кыргызская Республика","","","","","ACTIVE",now));
             balances.put(participantId,BigDecimal.ZERO);
-            UUID participantUserId=UUID.randomUUID();
-            users.put(participantUserId,new User(participantUserId,"Демо-участник","participant",participantId,"PARTICIPANT","ACTIVE",now));
-            passwords.put(participantUserId,"participant");
             UUID userId=UUID.randomUUID();
             users.put(userId,new User(userId,"Пользователь Демо","user",participantId,"USER","ACTIVE",now));
             passwords.put(userId,"user");
@@ -232,7 +229,7 @@ class TextbooksApi {
     @GetMapping("/{id}") Textbook get(@PathVariable UUID id,@RequestHeader("Authorization") String authorization){
         var t=s.textbook(id);if(!s.owns(s.requestUser(authorization),t.participantId()))throw s.error("FORBIDDEN","Карточка принадлежит другому участнику",HttpStatus.FORBIDDEN);return t;
     }
-    @PostMapping Textbook create(@Valid @RequestBody Req r,@RequestHeader("Authorization") String authorization){User u=s.requestUser(authorization);if((u.role().equals("USER") || u.role().equals("PARTICIPANT")) && (u.participantId()==null || !u.participantId().equals(r.participantId())))throw s.error("FORBIDDEN","Пользователь может создавать карточки только от своего участника",HttpStatus.FORBIDDEN);if(!s.validGtin(r.gtin()))throw s.error("INVALID_GTIN","Некорректный GTIN",HttpStatus.BAD_REQUEST);if(s.gtins.containsKey(r.gtin()))throw s.error("GTIN_ALREADY_EXISTS","GTIN уже используется",HttpStatus.CONFLICT);if(r.participantId()!=null)s.participant(r.participantId());UUID id=UUID.randomUUID();s.gtins.put(r.gtin(),id);var now=OffsetDateTime.now();var t=new Textbook(id,r.participantId(),r.gtin(),r.title(),r.fullTitle(),r.author(),r.schoolClass(),r.subject(),r.publisher(),r.year(),r.language(),r.isbn(),r.printRun(),r.ageCategory(),r.countryOfProduction(),r.manufacturer(),r.description(),"DRAFT",now,now);s.textbooks.put(id,t);return t;}
+    @PostMapping Textbook create(@Valid @RequestBody Req r,@RequestHeader("Authorization") String authorization){User u=s.requestUser(authorization);if(u.role().equals("USER") && (u.participantId()==null || !u.participantId().equals(r.participantId())))throw s.error("FORBIDDEN","Пользователь может создавать карточки только от своего участника",HttpStatus.FORBIDDEN);if(!s.validGtin(r.gtin()))throw s.error("INVALID_GTIN","Некорректный GTIN",HttpStatus.BAD_REQUEST);if(s.gtins.containsKey(r.gtin()))throw s.error("GTIN_ALREADY_EXISTS","GTIN уже используется",HttpStatus.CONFLICT);if(r.participantId()!=null)s.participant(r.participantId());UUID id=UUID.randomUUID();s.gtins.put(r.gtin(),id);var now=OffsetDateTime.now();var t=new Textbook(id,r.participantId(),r.gtin(),r.title(),r.fullTitle(),r.author(),r.schoolClass(),r.subject(),r.publisher(),r.year(),r.language(),r.isbn(),r.printRun(),r.ageCategory(),r.countryOfProduction(),r.manufacturer(),r.description(),"DRAFT",now,now);s.textbooks.put(id,t);return t;}
     @PostMapping("/{id}/publish") Textbook publish(@PathVariable UUID id,@RequestHeader("Authorization") String authorization){var t=s.textbook(id);if(!s.owns(s.requestUser(authorization),t.participantId()))throw s.error("FORBIDDEN","Нельзя публиковать чужую карточку",HttpStatus.FORBIDDEN);var n=new Textbook(t.id(),t.participantId(),t.gtin(),t.title(),t.fullTitle(),t.author(),t.schoolClass(),t.subject(),t.publisher(),t.year(),t.language(),t.isbn(),t.printRun(),t.ageCategory(),t.countryOfProduction(),t.manufacturer(),t.description(),"PUBLISHED",t.createdAt(),OffsetDateTime.now());s.textbooks.put(id,n);return n;}
 }
 
