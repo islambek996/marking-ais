@@ -186,3 +186,12 @@ footer {
   .result-heading { flex-direction: column; }
   footer { flex-direction: column; }
 }
+
+.photo-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.photo-row > span { color: #738197; font-size: 12px; line-height: 1.45; }
+.upload-button { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+.upload-button input { display: none; }
+
+@media (max-width: 700px) {
+  .photo-row { flex-direction: column; align-items: stretch; }
+}
