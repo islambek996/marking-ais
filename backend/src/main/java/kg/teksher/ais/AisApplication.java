@@ -77,7 +77,7 @@ class AisService {
         int sum=0,pos=0;for(int i=g.length()-2;i>=0;i--,pos++){int n=g.charAt(i)-48;sum+=n*(pos%2==0?3:1);}
         return (10-sum%10)%10==g.charAt(g.length()-1)-48;
     }
-    BigDecimal price(int q){return BigDecimal.valueOf(q).multiply(new BigDecimal("0.61")).setScale(2,RoundingMode.HALF_UP);}
+    BigDecimal price(int q){return BigDecimal.valueOf(q).multiply(new BigDecimal("1.00")).setScale(2,RoundingMode.HALF_UP);}
     Balance balance(UUID id){participant(id);BigDecimal b=balances.getOrDefault(id,BigDecimal.ZERO),r=reserved.getOrDefault(id,BigDecimal.ZERO);return new Balance(b,r,b.subtract(r),"KGS");}
 
     synchronized BillingOperation reserve(UUID p,String type,BigDecimal amount){
