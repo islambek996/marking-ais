@@ -59,7 +59,7 @@ record Document(UUID id, String number, String type, UUID participantId, String 
 }
 
 record History(UUID id, UUID codeId, String operation, String oldStatus, String newStatus, UUID participantId,
-               UUID documentId, OffsetDateTime createdAt) {
+               UUID documentId, UUID operationId, UUID billingOperationId, OffsetDateTime createdAt) {
 }
 
 record User(UUID id, String fullName, String login, UUID participantId, String role, String status,
@@ -345,9 +345,9 @@ class AisService {
         return result;
     }
 
-    void history(MarkingCode c, String operation, String oldStatus, String newStatus, UUID doc) {
+    void history(MarkingCode c, String operation, String oldStatus, String newStatus, UUID doc, UUID operationId, UUID billingOperationId) {
         UUID id = UUID.randomUUID();
-        history.put(id, new History(id, c.id(), operation, oldStatus, newStatus, c.participantId(), doc, OffsetDateTime.now()));
+        history.put(id, new History(id, c.id(), operation, oldStatus, newStatus, c.participantId(), doc, operationId, billingOperationId, OffsetDateTime.now()));
     }
 
     MarkingCode transition(UUID id, String target, String operation) {
@@ -356,7 +356,7 @@ class AisService {
         if (!ok) throw error("INVALID_STATUS_TRANSITION", "Недопустимый переход статуса кода", HttpStatus.BAD_REQUEST);
         var n = new MarkingCode(c.id(), c.participantId(), c.textbookId(), c.gtin(), c.serial(), c.payload(), c.dataMatrixBase64(), target, c.createdAt(), OffsetDateTime.now());
         codes.put(id, n);
-        history(n, operation, c.status(), target, null);
+        history(n, operation, c.status(), target, null, null, codeBilling.get(id));
         return n;
     }
 
@@ -399,9 +399,6 @@ class ParticipantsApi {
         var p = new Participant(id, r.inn(), r.name(), r.legalForm(), r.country(), r.legalAddress(), r.actualAddress(), r.phone(), r.email(), "ACTIVE", now);
         s.participants.put(id, p);
         s.balances.put(id, BigDecimal.ZERO);
-        UUID uid = UUID.randomUUID();
-        s.users.put(uid, new User(uid, r.name(), r.login(), id, "PARTICIPANT", "ACTIVE", now));
-        s.passwords.put(uid, r.password());
         return p;
     }
 
@@ -603,6 +600,8 @@ class OrdersApi {
             s.capture(bill.id());
             var done = new CodeOrder(id, r.participantId(), r.textbookId(), t.gtin(), r.quantity(), amount, bill.id(), "COMPLETED", now);
             s.orders.put(id, done);
+            UUID docId = UUID.randomUUID();
+            s.documents.put(docId, new Document(docId, s.docNumber("CODE_ORDER"), "CODE_ORDER", r.participantId(), "COMPLETED", OffsetDateTime.now(), null, bill.id()));
             return done;
         } catch (RuntimeException e) {
             s.release(bill.id());
@@ -626,8 +625,33 @@ class BillingApi {
     }
 
     @GetMapping("/balance/{participantId}")
-    Balance balance(@PathVariable UUID participantId) {
+    Balance balance(@PathVariable UUID participantId, @RequestHeader("Authorization") String authorization) {
+        User u = s.requestUser(authorization);
+        if (!s.owns(u, participantId)) throw s.error("FORBIDDEN", "Нет доступа к финансовому счёту участника", HttpStatus.FORBIDDEN);
         return s.balance(participantId);
+    }
+
+    @GetMapping("/history/{participantId}")
+    List<BillingOperation> history(@PathVariable UUID participantId, @RequestHeader("Authorization") String authorization) {
+        User u = s.requestUser(authorization);
+        if (!s.owns(u, participantId)) throw s.error("FORBIDDEN", "Нет доступа к финансовой истории участника", HttpStatus.FORBIDDEN);
+        s.participant(participantId);
+        return s.billing.values().stream().filter(x -> x.participantId().equals(participantId))
+                .sorted(Comparator.comparing(BillingOperation::createdAt).reversed()).toList();
+    }
+
+    @PostMapping("/deposit/{participantId}")
+    BillingOperation deposit(@PathVariable UUID participantId, @RequestParam BigDecimal amount, @RequestHeader("Authorization") String authorization) {
+        User u = s.requestUser(authorization);
+        if (!u.role().equals("ADMIN")) throw s.error("FORBIDDEN", "Пополнять счета может только администратор", HttpStatus.FORBIDDEN);
+        s.participant(participantId);
+        if (amount == null || amount.signum() <= 0) throw s.error("INVALID_AMOUNT", "Сумма должна быть больше нуля", HttpStatus.BAD_REQUEST);
+        UUID id = UUID.randomUUID();
+        var now = OffsetDateTime.now();
+        s.balances.merge(participantId, amount, BigDecimal::add);
+        var op = new BillingOperation(id, participantId, "DEPOSIT", amount, "CAPTURED", now, now);
+        s.billing.put(id, op);
+        return op;
     }
 
     @PostMapping("/calculate")
@@ -675,33 +699,51 @@ class OperationsApi {
     }
 
     @PostMapping("/marking")
-    Operation marking(@Valid @RequestBody Req r) {
-        return execute("MARKING", r, "EMITTED", "APPLIED");
+    Operation marking(@Valid @RequestBody Req r, @RequestHeader("Authorization") String authorization) {
+        return execute("MARKING", r, "EMITTED", "APPLIED", s.requestUser(authorization));
     }
 
     @PostMapping("/introduction")
-    Operation intro(@Valid @RequestBody Req r) {
-        return execute("INTRODUCTION", r, "APPLIED", "IN_CIRCULATION");
+    Operation intro(@Valid @RequestBody Req r, @RequestHeader("Authorization") String authorization) {
+        return execute("INTRODUCTION", r, "APPLIED", "IN_CIRCULATION", s.requestUser(authorization));
     }
 
     @PostMapping("/withdrawal")
-    Operation withdrawal(@Valid @RequestBody Req r) {
-        return execute("WITHDRAWAL", r, "IN_CIRCULATION", "WITHDRAWN");
+    Operation withdrawal(@Valid @RequestBody Req r, @RequestHeader("Authorization") String authorization) {
+        return execute("WITHDRAWAL", r, "IN_CIRCULATION", "WITHDRAWN", s.requestUser(authorization));
     }
 
-    private Operation execute(String type, Req r, String from, String to) {
-        if (r.codeIds() == null || r.codeIds().isEmpty())
-            throw s.error("CODES_REQUIRED", "Необходимо указать коды", HttpStatus.BAD_REQUEST);
+    private Operation execute(String type, Req r, String from, String to, User u) {
+        if (!s.owns(u, r.participantId())) throw s.error("FORBIDDEN", "Нельзя выполнять операцию для другого участника", HttpStatus.FORBIDDEN);
+        if (r.codeIds() == null || r.codeIds().isEmpty()) throw s.error("CODES_REQUIRED", "Необходимо указать коды", HttpStatus.BAD_REQUEST);
         for (UUID id : r.codeIds()) {
             var c = s.code(id);
-            if (!c.participantId().equals(r.participantId()))
-                throw s.error("PARTICIPANT_MISMATCH", "Код принадлежит другому участнику", HttpStatus.BAD_REQUEST);
-            if (!c.status().equals(from))
-                throw s.error("INVALID_STATUS_TRANSITION", "Недопустимый статус кода", HttpStatus.BAD_REQUEST);
+            if (!c.participantId().equals(r.participantId())) throw s.error("PARTICIPANT_MISMATCH", "Код принадлежит другому участнику", HttpStatus.BAD_REQUEST);
+            if (!c.status().equals(from)) throw s.error("INVALID_STATUS_TRANSITION", "Недопустимый статус кода", HttpStatus.BAD_REQUEST);
         }
         UUID opId = UUID.randomUUID();
-        for (UUID id : r.codeIds()) s.transition(id, to, type);
-        var op = new Operation(opId, type, r.participantId(), r.textbookId(), r.codeIds(), r.codeIds().size(), "SUCCESS", r.reason(), null, OffsetDateTime.now());
+        UUID billingId = null;
+        if (type.equals("MARKING")) {
+            BillingOperation bill = s.reserve(r.participantId(), "MARKING", s.price(r.codeIds().size()));
+            billingId = bill.id();
+            try {
+                for (UUID id : r.codeIds()) s.transition(id, to, type);
+                s.capture(bill.id());
+            } catch (RuntimeException e) {
+                s.release(bill.id());
+                throw e;
+            }
+        } else {
+            for (UUID id : r.codeIds()) s.transition(id, to, type);
+        }
+        UUID docId = UUID.randomUUID();
+        s.documents.put(docId, new Document(docId, s.docNumber(type), type, r.participantId(), "COMPLETED", OffsetDateTime.now(), opId, billingId));
+        for (UUID id : r.codeIds()) {
+            s.history.values().stream().filter(h -> h.codeId().equals(id) && h.documentId() == null)
+                    .max(Comparator.comparing(History::createdAt))
+                    .ifPresent(h -> s.history.put(h.id(), new History(h.id(), h.codeId(), h.operation(), h.oldStatus(), h.newStatus(), h.participantId(), docId, opId, billingId, h.createdAt())));
+        }
+        var op = new Operation(opId, type, r.participantId(), r.textbookId(), r.codeIds(), r.codeIds().size(), "SUCCESS", r.reason(), billingId, OffsetDateTime.now());
         s.operations.put(opId, op);
         return op;
     }
@@ -803,6 +845,8 @@ class UsersApi {
     User create(@Valid @RequestBody Req r) {
         if (s.users.values().stream().anyMatch(u -> u.login().equals(r.login())))
             throw s.error("LOGIN_ALREADY_EXISTS", "Логин уже используется", HttpStatus.CONFLICT);
+        if (!r.role().equals("ADMIN") && !r.role().equals("USER")) throw s.error("INVALID_ROLE", "Допустимые роли: ADMIN или USER", HttpStatus.BAD_REQUEST);
+        if (r.role().equals("USER") && r.participantId() == null) throw s.error("PARTICIPANT_REQUIRED", "Пользователь должен быть привязан к участнику", HttpStatus.BAD_REQUEST);
         UUID id = UUID.randomUUID();
         var u = new User(id, r.fullName(), r.login(), r.participantId(), r.role(), "ACTIVE", OffsetDateTime.now());
         s.users.put(id, u);
