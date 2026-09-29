@@ -51,11 +51,13 @@ record CodeOrder(UUID id, UUID participantId, UUID textbookId, String gtin, int 
 }
 
 record Operation(UUID id, String type, UUID participantId, UUID textbookId, List<UUID> codeIds, int quantity,
-                 String status, String reason, UUID billingOperationId, OffsetDateTime createdAt) {
+                 String status, String reason, UUID billingId, OffsetDateTime createdAt) {
+    UUID billingOperationId() { return billingId; }
 }
 
 record Document(UUID id, String number, String type, UUID participantId, String status, OffsetDateTime createdAt,
-                UUID operationId, UUID billingOperationId) {
+                UUID operationId, UUID billingId) {
+    UUID billingOperationId() { return billingId; }
 }
 
 record History(UUID id, UUID codeId, String operation, String oldStatus, String newStatus, UUID participantId,
