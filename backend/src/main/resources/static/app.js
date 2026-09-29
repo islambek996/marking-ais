@@ -226,13 +226,39 @@ function orders() {
 }
 
 function operations() {
-    const rows = state.operations.map(x => `<tr><td>${esc(x.type)}</td><td>${x.quantity}</td><td>${status(x.status)}</td><td>${esc(x.reason)}</td><td>${esc(x.createdAt)}</td></tr>`).join("");
-    $("content").innerHTML = panel("История операций", table(["Тип", "Количество", "Статус", "Причина", "Дата"], rows))
+    const rows = state.operations.map(x => `<tr><td>${esc(x.type)}</td><td>${x.quantity}</td><td>${status(x.status)}</td><td>${esc(x.reason)}</td><td>${esc(x.billingOperationId || "")}</td><td>${esc(x.createdAt)}</td></tr>`).join("");
+    const available = state.codes.filter(c => c.status === "EMITTED" || c.status === "APPLIED" || c.status === "IN_CIRCULATION");
+    const form = `<form id="operationForm" class="form">
+      <select name="type" required>
+        <option value="MARKING">Нанесение</option>
+        <option value="INTRODUCTION">Ввод в оборот</option>
+        <option value="WITHDRAWAL">Вывод из оборота</option>
+      </select>
+      <select name="codeId" required><option value="">Код маркировки *</option>${available.map(c => `<option value="${esc(c.id)}">${esc(c.gtin)} / ${esc(c.serial)} – ${esc(c.status)}</option>`).join("")}</select>
+      <input name="reason" placeholder="Причина – для вывода из оборота">
+      <button class="primary">Выполнить операцию</button>
+    </form>`;
+    $("content").innerHTML = `<div class="grid2">${panel("Новая операция", form)}${panel("История операций", table(["Тип","Количество","Статус","Причина","Billing ID","Дата"], rows))}</div>`;
+    formSubmit("operationForm", async f => {
+        const q = Object.fromEntries(f.entries());
+        const code = state.codes.find(x => x.id === q.codeId);
+        if (!code) throw new Error("Код не найден");
+        const endpoint = {MARKING:"marking",INTRODUCTION:"introduction",WITHDRAWAL:"withdrawal"}[q.type];
+        await api("/api/operations/" + endpoint, {
+            method:"POST",
+            body:JSON.stringify({
+                participantId: code.participantId,
+                textbookId: code.textbookId,
+                codeIds:[q.codeId],
+                reason:q.reason || null
+            })
+        });
+    });
 }
 
 function documents() {
-    const rows = state.documents.map(x => `<tr><td>${esc(x.number)}</td><td>${esc(x.type)}</td><td>${status(x.status)}</td><td>${esc(x.createdAt)}</td></tr>`).join("");
-    $("content").innerHTML = panel("Документы", table(["Номер", "Тип", "Статус", "Дата"], rows))
+    const rows = state.documents.map(x => `<tr><td>${esc(x.number)}</td><td>${esc(x.type)}</td><td>${status(x.status)}</td><td>${esc(x.operationId || "")}</td><td>${esc(x.billingOperationId || "")}</td><td>${esc(x.createdAt)}</td></tr>`).join("");
+    $("content").innerHTML = panel("Документы", table(["Номер","Тип","Статус","Операция","Billing ID","Дата"], rows));
 }
 
 async function finance() {
@@ -240,31 +266,40 @@ async function finance() {
         const rows = await Promise.all(state.participants.map(async p => {
             try {
                 const b = await api("/api/billing/balance/" + p.id);
-                return `<tr><td>${esc(p.name)}</td><td>${b.balance} KGS</td><td>${b.reservedBalance} KGS</td><td>${b.availableBalance} KGS</td><td><button class="small" onclick="deposit('${p.id}')">Пополнить</button></td></tr>`;
-            } catch {
-                return ""
-            }
+                return `<tr><td><b>${esc(p.name)}</b><br><small>${esc(p.inn)}</small></td><td>${b.balance} KGS</td><td>${b.reservedBalance} KGS</td><td>${b.availableBalance} KGS</td><td><button class="small" onclick="openFinance('${p.id}')">Открыть</button> <button class="small" onclick="deposit('${p.id}')">Пополнить</button></td></tr>`;
+            } catch { return ""; }
         }));
-        $("content").innerHTML = panel("Финансы участников", table(["Участник", "Баланс", "Зарезервировано", "Доступно", ""], rows.join("")));
+        $("content").innerHTML = panel("Финансы участников", table(["Участник","Баланс","Зарезервировано","Доступно","Действия"], rows.join("")));
         return;
     }
     if (!state.me.participantId) {
         $("content").innerHTML = panel("Финансы", empty("Аккаунт не привязан к участнику"));
         return;
     }
-    const b = await api("/api/billing/balance/" + state.me.participantId);
-    $("content").innerHTML = panel("Мой баланс", `
-    <div class="cards">
-      <div class="card"><span>Баланс</span><strong>${b.balance} KGS</strong></div>
-      <div class="card"><span>Зарезервировано</span><strong>${b.reservedBalance} KGS</strong></div>
-      <div class="card"><span>Доступно</span><strong>${b.availableBalance} KGS</strong></div>
-    </div>
-    <div class="settings">
-      <div><b>Участник</b><p>${esc(state.participants[0]?.name || "")}</p></div>
-      <div><b>Стоимость нанесения</b><p>1,00 KGS за код</p></div>
-    </div>`);
+    await openFinance(state.me.participantId);
 }
 
+async function openFinance(id) {
+    try {
+        const p = state.participants.find(x => x.id === id) || await api("/api/participants/" + id);
+        const b = await api("/api/billing/balance/" + id);
+        const h = await api("/api/billing/history/" + id);
+        const rows = h.map(x => `<tr><td>${esc(x.type)}</td><td>${x.amount} KGS</td><td>${status(x.status)}</td><td>${esc(x.id)}</td><td>${esc(x.createdAt)}</td></tr>`).join("");
+        const actions = state.me.role === "ADMIN" ? `<div class="settings">
+          <div><b>Пополнение счёта</b><p><button class="small" onclick="deposit('${id}')">Пополнить</button></p></div>
+          <div><b>Финансовые операции</b><p>Резервирование и списание выполняются автоматически при операциях AIS.</p></div>
+        </div>` : "";
+        $("content").innerHTML = `<button class="small" onclick="loadPage()">← К списку участников</button><br><br>
+          ${panel("Финансовый счёт – " + esc(p.name), `
+            <div class="cards">
+              <div class="card"><span>Баланс</span><strong>${b.balance} KGS</strong></div>
+              <div class="card"><span>Зарезервировано</span><strong>${b.reservedBalance} KGS</strong></div>
+              <div class="card"><span>Доступно</span><strong>${b.availableBalance} KGS</strong></div>
+            </div>${actions}
+          `)}
+          <br>${panel("История финансовых операций", table(["Операция","Сумма","Статус","Billing ID","Дата"], rows))}`;
+    } catch (e) { showError(e.message); }
+}
 function history() {
     const rows = state.history.map(x => `<tr><td>${esc(x.operation)}</td><td>${esc(x.oldStatus)}</td><td>${esc(x.newStatus)}</td><td>${esc(x.codeId)}</td><td>${esc(x.createdAt)}</td></tr>`).join("");
     $("content").innerHTML = panel("История изменений кодов", table(["Операция", "Было", "Стало", "Код", "Дата"], rows))
@@ -279,7 +314,7 @@ function settings() {
         <input name="fullName" placeholder="ФИО *" required>
         <input name="login" placeholder="Логин *" required>
         <input name="password" type="password" placeholder="Пароль *" required>
-        <select name="role"><option value="USER">Пользователь</option></select>
+        <select name="role"><option value="USER">Пользователь</option><option value="ADMIN">Администратор</option></select>
         <select name="participantId"><option value="">Привязать к участнику</option>${opts(state.participants)}</select>
         <button class="primary">Создать пользователя</button>
       </form>` + table(["ФИО", "Логин", "Роль", "Статус"], rows)
