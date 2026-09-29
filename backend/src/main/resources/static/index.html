@@ -1,31 +1,37 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>ТЕКШЕР AIS – маркировка учебников</title><link rel="stylesheet" href="/styles.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>ТЕКШЕР AIS – маркировка учебников</title>
+    <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <div class="app">
-<aside class="sidebar">
-  <div class="logo">ТЕКШЕР <span>AIS</span></div>
-  <nav id="nav">
-    <button class="active" data-page="dashboard">Главная</button>
-    <button data-page="participants">Участники</button>
-    <button data-page="textbooks">Учебники</button>
-    <button data-page="codes">Коды маркировки</button>
-    <button data-page="orders">Заказы КМ</button>
-    <button data-page="operations">Операции</button>
-    <button data-page="documents">Документы</button>
-    <button data-page="finance">Финансы</button>
-    <button data-page="history">История</button>
-    <button data-page="settings">Настройки</button>
-  </nav>
-</aside>
-<main>
-  <header><div><h1 id="pageTitle">АИС маркировки учебников</h1><p id="pageSubtitle">Рабочая панель MVP</p></div><button class="refresh" id="refresh">Обновить</button></header>
-  <div id="error" class="error hidden"></div>
-  <div id="content"></div>
-</main>
+    <aside class="sidebar">
+        <div class="logo">ТЕКШЕР <span>AIS</span></div>
+        <nav id="nav">
+            <button class="active" data-page="dashboard">Главная</button>
+            <button data-page="participants">Участники</button>
+            <button data-page="textbooks">Учебники</button>
+            <button data-page="codes">Коды маркировки</button>
+            <button data-page="orders">Заказы КМ</button>
+            <button data-page="operations">Операции</button>
+            <button data-page="documents">Документы</button>
+            <button data-page="finance">Финансы</button>
+            <button data-page="history">История</button>
+            <button data-page="settings">Настройки</button>
+        </nav>
+    </aside>
+    <main>
+        <header>
+            <div><h1 id="pageTitle">АИС маркировки учебников</h1>
+                <p id="pageSubtitle">Рабочая панель MVP</p></div>
+            <button class="refresh" id="refresh">Обновить</button>
+        </header>
+        <div id="error" class="error hidden"></div>
+        <div id="content"></div>
+    </main>
 </div>
 <script src="/app.js"></script>
 </body>

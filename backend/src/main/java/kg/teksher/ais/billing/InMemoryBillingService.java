@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Временная реализация Billing для MVP.
- *
+ * <p>
  * Важно: это не финансовый ledger. Здесь реализован только минимальный
  * жизненный цикл операции: RESERVED -> CAPTURED/RELEASED -> REFUNDED.
  * На этапе PostgreSQL этот класс будет заменён полноценным Billing-хранилищем.
