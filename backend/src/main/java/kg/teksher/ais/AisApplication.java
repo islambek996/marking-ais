@@ -745,12 +745,14 @@ class OperationsApi {
         } else {
             for (UUID id : r.codeIds()) s.transition(id, to, type);
         }
+        final UUID finalBillingId = billingId;
+
         UUID docId = UUID.randomUUID();
         s.documents.put(docId, new Document(docId, s.docNumber(type), type, r.participantId(), "COMPLETED", OffsetDateTime.now(), opId, billingId));
         for (UUID id : r.codeIds()) {
             s.history.values().stream().filter(h -> h.codeId().equals(id) && h.documentId() == null)
                     .max(Comparator.comparing(History::createdAt))
-                    .ifPresent(h -> s.history.put(h.id(), new History(h.id(), h.codeId(), h.operation(), h.oldStatus(), h.newStatus(), h.participantId(), docId, opId, billingId, h.createdAt())));
+                    .ifPresent(h -> s.history.put(h.id(), new History(h.id(), h.codeId(), h.operation(), h.oldStatus(), h.newStatus(), h.participantId(), docId, opId, finalBillingId, h.createdAt())));
         }
         var op = new Operation(opId, type, r.participantId(), r.textbookId(), r.codeIds(), r.codeIds().size(), "SUCCESS", r.reason(), billingId, OffsetDateTime.now());
         s.operations.put(opId, op);
