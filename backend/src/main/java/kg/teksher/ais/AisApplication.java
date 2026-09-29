@@ -724,14 +724,21 @@ class OperationsApi {
         UUID opId = UUID.randomUUID();
         UUID billingId = null;
         if (type.equals("MARKING")) {
-            BillingOperation bill = s.reserve(r.participantId(), "MARKING", s.price(r.codeIds().size()));
-            billingId = bill.id();
-            try {
+            long chargeable = r.codeIds().stream().filter(id -> !s.codeBilling.containsKey(id)).count();
+            if (chargeable > 0) {
+                BillingOperation bill = s.reserve(r.participantId(), "MARKING", s.price((int) chargeable));
+                billingId = bill.id();
+                try {
+                    for (UUID id : r.codeIds()) s.transition(id, to, type);
+                    s.capture(bill.id());
+                    for (UUID id : r.codeIds()) if (!s.codeBilling.containsKey(id)) s.codeBilling.put(id, bill.id());
+                } catch (RuntimeException e) {
+                    s.release(bill.id());
+                    throw e;
+                }
+            } else if (!r.codeIds().isEmpty()) {
+                billingId = s.codeBilling.get(r.codeIds().get(0));
                 for (UUID id : r.codeIds()) s.transition(id, to, type);
-                s.capture(bill.id());
-            } catch (RuntimeException e) {
-                s.release(bill.id());
-                throw e;
             }
         } else {
             for (UUID id : r.codeIds()) s.transition(id, to, type);
