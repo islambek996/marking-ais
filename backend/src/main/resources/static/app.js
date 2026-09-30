@@ -72,7 +72,7 @@ async function refreshData() {
     } else {
         [t, c, o, op, d, h] = data;
     }
-    if (state.me?.role === "USER") && state.me.participantId) {
+    if (state.me?.role === "USER" && state.me.participantId) {
         try {
             p = [await api("/api/participants/" + state.me.participantId)]
         } catch {
