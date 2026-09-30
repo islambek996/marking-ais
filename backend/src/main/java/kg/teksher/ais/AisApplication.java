@@ -140,7 +140,9 @@ class AuthFilter extends OncePerRequestFilter {
                             path.equals("/api/code-orders") ||
                             path.equals("/api/marking-codes/generate") ||
                             path.matches("/api/marking-codes/[^/]+/(apply|circulate|withdraw)") ||
-                            path.matches("/api/operations/(marking|introduction|withdrawal)")
+                            path.matches("/api/operations/(marking|introduction|withdrawal)") ||
+                            path.equals("/api/aggregations") ||
+                            path.matches("/api/aggregations/[^/]+/disaggregate")
             )) return true;
         }
         return false;
@@ -756,32 +758,125 @@ class AggregationApi {
     }
 
     @GetMapping
-    List<Aggregate> all() {
-        return new ArrayList<>(s.aggregates.values());
+    List<Aggregate> all(@RequestHeader("Authorization") String authorization) {
+        User u = s.requestUser(authorization);
+        return s.aggregates.values().stream()
+                .filter(a -> {
+                    if (u.role().equals("ADMIN")) return true;
+                    return a.codeIds().stream().map(id -> s.code(id).participantId()).allMatch(p -> s.owns(u, p));
+                })
+                .toList();
     }
 
     @PostMapping
-    Aggregate create(@Valid @RequestBody Req r) {
+    Aggregate create(@Valid @RequestBody Req r, @RequestHeader("Authorization") String authorization) {
+        User u = s.requestUser(authorization);
         if (r.codeIds() == null || r.codeIds().isEmpty())
             throw s.error("CODES_REQUIRED", "Необходимо указать коды", HttpStatus.BAD_REQUEST);
-        for (UUID id : r.codeIds()) {
-            var c = s.code(id);
-            if (!c.participantId().equals(r.participantId()) || !c.status().equals("IN_CIRCULATION"))
-                throw s.error("INVALID_AGGREGATION", "Код нельзя агрегировать", HttpStatus.BAD_REQUEST);
+        if (r.codeIds().size() < 2)
+            throw s.error("CODES_REQUIRED", "Для агрегации необходимо минимум 2 кода", HttpStatus.BAD_REQUEST);
+
+        UUID participantId = r.participantId();
+        if (participantId == null) {
+            var first = s.code(r.codeIds().get(0));
+            participantId = first.participantId();
         }
+        if (!s.owns(u, participantId))
+            throw s.error("FORBIDDEN", "Агрегация принадлежит другому участнику", HttpStatus.FORBIDDEN);
+
+        String sscc = r.sscc();
+        if (sscc == null || sscc.isBlank()) {
+            sscc = generateSscc();
+        }
+        if (!sscc.matches("\\d{18}"))
+            throw s.error("INVALID_SSCC", "SSCC должен содержать 18 цифр", HttpStatus.BAD_REQUEST);
+        String finalSscc = sscc;
+        if (s.aggregates.values().stream().anyMatch(a -> a.sscc().equals(finalSscc) && a.status().equals("ACTIVE")))
+            throw s.error("SSCC_ALREADY_EXISTS", "SSCC уже используется активной агрегацией", HttpStatus.BAD_REQUEST);
+
+        Set<UUID> unique = new LinkedHashSet<>(r.codeIds());
+        if (unique.size() != r.codeIds().size())
+            throw s.error("DUPLICATE_CODES", "В агрегации не должно быть повторяющихся кодов", HttpStatus.BAD_REQUEST);
+
+        for (UUID id : unique) {
+            var c = s.code(id);
+            if (!c.participantId().equals(participantId) || !c.status().equals("IN_CIRCULATION"))
+                throw s.error("INVALID_AGGREGATION", "Все коды должны принадлежать участнику и находиться в статусе IN_CIRCULATION", HttpStatus.BAD_REQUEST);
+            boolean alreadyAggregated = s.aggregates.values().stream()
+                    .anyMatch(a -> a.status().equals("ACTIVE") && a.codeIds().contains(id));
+            if (alreadyAggregated)
+                throw s.error("CODE_ALREADY_AGGREGATED", "Один из кодов уже входит в активную агрегацию", HttpStatus.BAD_REQUEST);
+        }
+
         UUID id = UUID.randomUUID();
-        var a = new Aggregate(id, r.sscc(), List.copyOf(r.codeIds()), "ACTIVE", OffsetDateTime.now());
+        var now = OffsetDateTime.now();
+        var a = new Aggregate(id, finalSscc, List.copyOf(unique), "ACTIVE", now);
         s.aggregates.put(id, a);
+
+        UUID operationId = UUID.randomUUID();
+        var operation = new Operation(operationId, "AGGREGATION", participantId, s.code(unique.iterator().next()).textbookId(),
+                List.copyOf(unique), unique.size(), "COMPLETED", null, null, now);
+        s.operations.put(operationId, operation);
+
+        UUID documentId = UUID.randomUUID();
+        var document = new Document(documentId, s.docNumber("AGGREGATION"), "AGGREGATION", participantId, "COMPLETED", now, operationId, null);
+        s.documents.put(documentId, document);
+
+        for (UUID codeId : unique) {
+            var code = s.code(codeId);
+            s.history(code, "AGGREGATION", code.status(), code.status(), documentId, operationId, null);
+        }
         return a;
     }
 
     @PostMapping("/{id}/disaggregate")
-    Aggregate disaggregate(@PathVariable UUID id) {
+    Aggregate disaggregate(@PathVariable UUID id, @RequestHeader("Authorization") String authorization) {
+        User u = s.requestUser(authorization);
         var a = s.aggregates.get(id);
         if (a == null) throw s.error("AGGREGATE_NOT_FOUND", "Агрегация не найдена", HttpStatus.NOT_FOUND);
+        if (a.status().equals("DISAGGREGATED"))
+            return a;
+
+        UUID participantId = s.code(a.codeIds().get(0)).participantId();
+        if (!s.owns(u, participantId))
+            throw s.error("FORBIDDEN", "Агрегация принадлежит другому участнику", HttpStatus.FORBIDDEN);
+
+        var now = OffsetDateTime.now();
         var n = new Aggregate(a.id(), a.sscc(), a.codeIds(), "DISAGGREGATED", a.createdAt());
         s.aggregates.put(id, n);
+
+        UUID operationId = UUID.randomUUID();
+        var operation = new Operation(operationId, "DISAGGREGATION", participantId, s.code(a.codeIds().get(0)).textbookId(),
+                a.codeIds(), a.codeIds().size(), "COMPLETED", null, null, now);
+        s.operations.put(operationId, operation);
+
+        UUID documentId = UUID.randomUUID();
+        var document = new Document(documentId, s.docNumber("DISAGGREGATION"), "DISAGGREGATION", participantId, "COMPLETED", now, operationId, null);
+        s.documents.put(documentId, document);
+
+        for (UUID codeId : a.codeIds()) {
+            var code = s.code(codeId);
+            s.history(code, "DISAGGREGATION", code.status(), code.status(), documentId, operationId, null);
+        }
         return n;
+    }
+
+    private String generateSscc() {
+        while (true) {
+            String base = String.format("%016d", Math.abs(new Random().nextLong()) % 10000000000000000L);
+            String candidate17 = base;
+            int sum = 0;
+            boolean weight3 = true;
+            for (int i = candidate17.length() - 1; i >= 0; i--) {
+                int digit = candidate17.charAt(i) - '0';
+                sum += digit * (weight3 ? 3 : 1);
+                weight3 = !weight3;
+            }
+            int check = (10 - (sum % 10)) % 10;
+            String sscc = candidate17 + check;
+            if (s.aggregates.values().stream().noneMatch(a -> a.sscc().equals(sscc) && a.status().equals("ACTIVE")))
+                return sscc;
+        }
     }
 }
 
