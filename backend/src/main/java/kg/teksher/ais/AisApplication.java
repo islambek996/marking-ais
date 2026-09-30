@@ -52,7 +52,6 @@ record CodeOrder(UUID id, UUID participantId, UUID textbookId, String gtin, int 
 
 record Operation(UUID id, String type, UUID participantId, UUID textbookId, List<UUID> codeIds, int quantity,
                  String status, String reason, UUID billingId, OffsetDateTime createdAt) {
-    UUID billingOperationId() { return billingId; }
 }
 
 record Document(UUID id, String number, String type, UUID participantId, String status, OffsetDateTime createdAt,
@@ -377,7 +376,7 @@ class ParticipantsApi {
     }
 
     record Req(@NotBlank String inn, @NotBlank String name, String legalForm, String country, String legalAddress,
-               String actualAddress, String phone, String email, String login, String password) {
+               String actualAddress, String phone, String email) {
     }
 
     @GetMapping
@@ -392,10 +391,6 @@ class ParticipantsApi {
 
     @PostMapping
     Participant create(@Valid @RequestBody Req r) {
-        if (r.login() == null || r.login().isBlank() || r.password() == null || r.password().isBlank())
-            throw s.error("INVALID_ACCOUNT", "Для участника необходимо указать логин и пароль", HttpStatus.BAD_REQUEST);
-        if (s.users.values().stream().anyMatch(u -> u.login().equalsIgnoreCase(r.login())))
-            throw s.error("LOGIN_ALREADY_EXISTS", "Логин уже используется", HttpStatus.CONFLICT);
         UUID id = UUID.randomUUID();
         var now = OffsetDateTime.now();
         var p = new Participant(id, r.inn(), r.name(), r.legalForm(), r.country(), r.legalAddress(), r.actualAddress(), r.phone(), r.email(), "ACTIVE", now);
@@ -404,14 +399,6 @@ class ParticipantsApi {
         return p;
     }
 
-    @PostMapping("/{id}/balance")
-    Balance deposit(@PathVariable UUID id, @RequestParam BigDecimal amount) {
-        s.participant(id);
-        if (amount == null || amount.signum() <= 0)
-            throw s.error("INVALID_AMOUNT", "Сумма должна быть больше нуля", HttpStatus.BAD_REQUEST);
-        s.balances.merge(id, amount, BigDecimal::add);
-        return s.balance(id);
-    }
 
     @GetMapping("/{id}/balance")
     Balance balance(@PathVariable UUID id) {
