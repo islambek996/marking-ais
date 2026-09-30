@@ -7,6 +7,7 @@ let state = {
     operations: [],
     documents: [],
     history: [],
+    aggregates: [],
     users: [],
     me: null
 };
@@ -63,14 +64,14 @@ function showLogin() {
 }
 
 async function refreshData() {
-    const requests = [api("/api/textbooks"), api("/api/marking-codes"), api("/api/code-orders"), api("/api/operations"), api("/api/documents"), api("/api/history")];
+    const requests = [api("/api/textbooks"), api("/api/marking-codes"), api("/api/code-orders"), api("/api/operations"), api("/api/documents"), api("/api/history"), api("/api/aggregations")];
     if (state.me?.role === "ADMIN") requests.unshift(api("/api/participants"));
     const data = await Promise.all(requests);
     let p = [], t, c, o, op, d, h;
     if (state.me?.role === "ADMIN") {
-        [p, t, c, o, op, d, h] = data
+        [p, t, c, o, op, d, h, a] = data
     } else {
-        [t, c, o, op, d, h] = data;
+        [t, c, o, op, d, h, a] = data;
     }
     if (state.me?.role === "USER" && state.me.participantId) {
         try {
@@ -85,7 +86,8 @@ async function refreshData() {
         orders: o,
         operations: op,
         documents: d,
-        history: h
+        history: h,
+        aggregates: a
     });
     if (state.me?.role === "ADMIN") state.users = await api("/api/users");
 }
@@ -256,6 +258,72 @@ function operations() {
     });
 }
 
+function aggregations() {
+    const rows = state.aggregates.map(a => {
+        const active = a.status === "ACTIVE";
+        const participantCodes = a.codeIds.map(id => state.codes.find(c => c.id === id)).filter(Boolean);
+        const participantId = participantCodes[0]?.participantId || "";
+        return `<tr>
+            <td><b>${esc(a.sscc)}</b></td>
+            <td>${a.codeIds.length}</td>
+            <td>${status(a.status)}</td>
+            <td>${esc(a.createdAt)}</td>
+            <td>${active ? `<button class="small danger" onclick="disaggregate('${a.id}')">Разагрегировать</button>` : ""}</td>
+        </tr>`;
+    }).join("");
+
+    const available = state.codes.filter(c =>
+        c.status === "IN_CIRCULATION" &&
+        !state.aggregates.some(a => a.status === "ACTIVE" && a.codeIds.includes(c.id))
+    );
+
+    const options = available.map(c =>
+        `<option value="${esc(c.id)}">${esc(c.gtin)} / ${esc(c.serial)}</option>`
+    ).join("");
+
+    const form = `<form id="aggregationForm" class="form">
+        ${state.me.role === "ADMIN" ? `<select name="participantId" required>
+            <option value="">Участник *</option>${opts(state.participants)}
+        </select>` : ""}
+        <input name="sscc" placeholder="SSCC – необязательно">
+        <select name="codeIds" id="aggregationCodes" multiple required size="8">${options}</select>
+        <small style="grid-column:1/-1;color:#697586">
+            Выберите минимум 2 кода в статусе IN_CIRCULATION. Для выбора нескольких кодов удерживайте Ctrl.
+        </small>
+        <button class="primary">Создать агрегацию</button>
+    </form>`;
+
+    $("content").innerHTML =
+        `<div class="grid2">
+            ${panel("Новая агрегация", form)}
+            ${panel("Агрегации", table(["SSCC","Кодов","Статус","Дата","Действия"], rows))}
+        </div>`;
+
+    formSubmit("aggregationForm", async f => {
+        const codeIds = Array.from($("aggregationCodes").selectedOptions).map(o => o.value);
+        if (codeIds.length < 2) throw new Error("Выберите минимум 2 кода");
+        const q = Object.fromEntries(f.entries());
+        const body = {
+            participantId: q.participantId || null,
+            sscc: q.sscc || null,
+            codeIds
+        };
+        await api("/api/aggregations", {
+            method: "POST",
+            body: JSON.stringify(body)
+        });
+    });
+}
+
+async function disaggregate(id) {
+    try {
+        await api("/api/aggregations/" + id + "/disaggregate", {method:"POST"});
+        await loadPage();
+    } catch (e) {
+        showError(e.message);
+    }
+}
+
 function documents() {
     const rows = state.documents.map(x => `<tr><td>${esc(x.number)}</td><td>${esc(x.type)}</td><td>${status(x.status)}</td><td>${esc(x.operationId || "")}</td><td>${esc(x.billingId || "")}</td><td>${esc(x.createdAt)}</td></tr>`).join("");
     $("content").innerHTML = panel("Документы", table(["Номер","Тип","Статус","Операция","Billing ID","Дата"], rows));
@@ -351,6 +419,7 @@ const pages = {
     orders: ["Заказы КМ", "Заказ и стоимость кодов", orders],
     operations: ["Операции", "Нанесение, ввод и вывод из оборота", operations],
     documents: ["Документы", "Документы операций", documents],
+    aggregations: ["Агрегация", "Объединение КМ в транспортную единицу SSCC", aggregations],
     finance: ["Финансы", "Баланс и резервирование", finance],
     history: ["История", "Аудит изменений", history],
     settings: ["Настройки", "Пользователи, роли и параметры", settings]
