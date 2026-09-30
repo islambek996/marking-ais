@@ -56,7 +56,6 @@ record Operation(UUID id, String type, UUID participantId, UUID textbookId, List
 
 record Document(UUID id, String number, String type, UUID participantId, String status, OffsetDateTime createdAt,
                 UUID operationId, UUID billingId) {
-    UUID billingOperationId() { return billingId; }
 }
 
 record History(UUID id, UUID codeId, String operation, String oldStatus, String newStatus, UUID participantId,
@@ -400,10 +399,7 @@ class ParticipantsApi {
     }
 
 
-    @GetMapping("/{id}/balance")
-    Balance balance(@PathVariable UUID id) {
-        return s.balance(id);
-    }
+
 }
 
 @RestController
