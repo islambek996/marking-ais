@@ -72,7 +72,7 @@ async function refreshData() {
     } else {
         [t, c, o, op, d, h] = data;
     }
-    if ((state.me?.role === "USER" || state.me?.role === "PARTICIPANT") && state.me.participantId) {
+    if (state.me?.role === "USER") && state.me.participantId) {
         try {
             p = [await api("/api/participants/" + state.me.participantId)]
         } catch {
@@ -149,8 +149,8 @@ function participants() {
 }
 
 function textbooks() {
-    const rows = state.textbooks.map(x => `<tr><td>${esc(x.title)}</td><td>${esc(x.gtin)}</td><td>${esc(x.author)}</td><td>${esc(x.publisher)}</td><td>${esc(x.year)}</td><td>${status(x.status)}</td><td>${x.status === "DRAFT" && (state.me.role === "ADMIN" || state.me.role === "USER" || state.me.role === "PARTICIPANT") ? `<button class="small" onclick="publishTextbook('${x.id}')">Опубликовать</button>` : ""}</td></tr>`).join("");
-    let form = state.me.role === "ADMIN" || state.me.role === "USER" || state.me.role === "PARTICIPANT" ? `<form id="textbookForm" class="form"><input type="hidden" name="participantId" value="${state.me.role === "USER" || state.me.role === "PARTICIPANT" ? (state.me.participantId || "") : ""}">${state.me.role === "ADMIN" ? `<select name="participantId"><option value="">Участник – необязательно</option>${opts(state.participants)}</select>` : ""}<input name="gtin" placeholder="GTIN *" required><input name="title" placeholder="Название *" required><input name="fullTitle" placeholder="Полное название"><input name="author" placeholder="Автор *" required><input name="schoolClass" placeholder="Класс *" required><input name="subject" placeholder="Предмет *" required><input name="publisher" placeholder="Издательство *" required><input name="year" type="number" placeholder="Год издания *" required><input name="language" placeholder="Язык *" required><input name="isbn" placeholder="ISBN *" required><input name="printRun" type="number" placeholder="Тираж"><input name="ageCategory" placeholder="Возрастная категория"><input name="countryOfProduction" placeholder="Страна производства"><input name="manufacturer" placeholder="Производитель"><textarea name="description" placeholder="Описание"></textarea><button class="primary">Создать карточку</button></form>` : empty("Создание карточек недоступно для этой роли");
+    const rows = state.textbooks.map(x => `<tr><td>${esc(x.title)}</td><td>${esc(x.gtin)}</td><td>${esc(x.author)}</td><td>${esc(x.publisher)}</td><td>${esc(x.year)}</td><td>${status(x.status)}</td><td>${x.status === "DRAFT" && (state.me.role === "ADMIN" || state.me.role === "USER") ? `<button class="small" onclick="publishTextbook('${x.id}')">Опубликовать</button>` : ""}</td></tr>`).join("");
+    let form = state.me.role === "ADMIN" || state.me.role === "USER" ? `<form id="textbookForm" class="form"><input type="hidden" name="participantId" value="${state.me.role === "USER" ? (state.me.participantId || "") : ""}">${state.me.role === "ADMIN" ? `<select name="participantId"><option value="">Участник – необязательно</option>${opts(state.participants)}</select>` : ""}<input name="gtin" placeholder="GTIN *" required><input name="title" placeholder="Название *" required><input name="fullTitle" placeholder="Полное название"><input name="author" placeholder="Автор *" required><input name="schoolClass" placeholder="Класс *" required><input name="subject" placeholder="Предмет *" required><input name="publisher" placeholder="Издательство *" required><input name="year" type="number" placeholder="Год издания *" required><input name="language" placeholder="Язык *" required><input name="isbn" placeholder="ISBN *" required><input name="printRun" type="number" placeholder="Тираж"><input name="ageCategory" placeholder="Возрастная категория"><input name="countryOfProduction" placeholder="Страна производства"><input name="manufacturer" placeholder="Производитель"><textarea name="description" placeholder="Описание"></textarea><button class="primary">Создать карточку</button></form>` : empty("Создание карточек недоступно для этой роли");
     $("content").innerHTML = `<div class="grid2">${panel("Новая карточка учебника", form)}${panel("Карточки учебников", table(["Название", "GTIN", "Автор", "Издательство", "Год", "Статус", ""], rows))}</div>`;
     if ($("textbookForm")) formSubmit("textbookForm", async f => {
         let o = Object.fromEntries(f.entries());
@@ -174,7 +174,7 @@ async function publishTextbook(id) {
 async function deposit(id) {
     const amount = prompt("Сумма пополнения, KGS:");
     if (amount) try {
-        await api("/api/participants/" + id + "/balance?amount=" + encodeURIComponent(amount), {method: "POST"});
+        await api("/api/billing/deposit/" + id + "?amount=" + encodeURIComponent(amount), {method: "POST"});
         await loadPage()
     } catch (e) {
         showError(e.message)
@@ -182,8 +182,8 @@ async function deposit(id) {
 }
 
 function codes() {
-    const rows = state.codes.map(x => `<tr><td>${esc(x.serial)}</td><td>${esc(x.gtin)}</td><td>${status(x.status)}</td><td><button class="small" onclick="viewCode('${x.id}')">DataMatrix</button>${x.status === "EMITTED" && state.me.role !== "PARTICIPANT" ? ` <button class="small" onclick="changeCode('${x.id}','apply')">Нанести / печать</button>` : ""}${x.status === "APPLIED" && state.me.role !== "PARTICIPANT" ? ` <button class="small" onclick="changeCode('${x.id}','circulate')">Ввести в оборот</button>` : ""}${x.status === "IN_CIRCULATION" && state.me.role !== "PARTICIPANT" ? ` <button class="small danger" onclick="changeCode('${x.id}','withdraw')">Вывести</button>` : ""}</td></tr>`).join("");
-    let form = state.me.role === "ADMIN" || state.me.role === "USER" || state.me.role === "PARTICIPANT" ? `<form id="codeForm" class="form"><input type="hidden" name="participantId" value="${state.me.role === "USER" || state.me.role === "PARTICIPANT" ? (state.me.participantId || "") : ""}">${state.me.role === "ADMIN" ? `<select name="participantId" required><option value="">Участник *</option>${opts(state.participants)}</select>` : ""}<select name="textbookId" required><option value="">Учебник *</option>${opts(state.textbooks, "title")}</select><input name="quantity" type="number" min="1" value="1" required><button class="primary">Сгенерировать КМ</button></form>` : empty("Генерация КМ недоступна для этой роли");
+    const rows = state.codes.map(x => `<tr><td>${esc(x.serial)}</td><td>${esc(x.gtin)}</td><td>${status(x.status)}</td><td><button class="small" onclick="viewCode('${x.id}')">DataMatrix</button>${x.status === "EMITTED" && true ? ` <button class="small" onclick="changeCode('${x.id}','apply')">Нанести / печать</button>` : ""}${x.status === "APPLIED" && true ? ` <button class="small" onclick="changeCode('${x.id}','circulate')">Ввести в оборот</button>` : ""}${x.status === "IN_CIRCULATION" && true ? ` <button class="small danger" onclick="changeCode('${x.id}','withdraw')">Вывести</button>` : ""}</td></tr>`).join("");
+    let form = state.me.role === "ADMIN" || state.me.role === "USER" ? `<form id="codeForm" class="form"><input type="hidden" name="participantId" value="${state.me.role === "USER" ? (state.me.participantId || "") : ""}">${state.me.role === "ADMIN" ? `<select name="participantId" required><option value="">Участник *</option>${opts(state.participants)}</select>` : ""}<select name="textbookId" required><option value="">Учебник *</option>${opts(state.textbooks, "title")}</select><input name="quantity" type="number" min="1" value="1" required><button class="primary">Сгенерировать КМ</button></form>` : empty("Генерация КМ недоступна для этой роли");
     $("content").innerHTML = `<div class="grid2">${panel("Формирование КМ", form)}${panel("Коды маркировки", table(["Серийный номер", "GTIN", "Статус", "Действия"], rows))}</div>`;
     if ($("codeForm")) formSubmit("codeForm", async f => {
         const q = Object.fromEntries(f.entries());
@@ -210,7 +210,7 @@ async function changeCode(id, a) {
 
 function orders() {
     const rows = state.orders.map(x => `<tr><td>${esc(x.id)}</td><td>${esc(x.gtin)}</td><td>${x.quantity}</td><td>${x.amount} KGS</td><td>${status(x.status)}</td></tr>`).join("");
-    const form = state.me.role === "ADMIN" || state.me.role === "USER" || state.me.role === "PARTICIPANT" ? `<form id="orderForm" class="form"><input type="hidden" name="participantId" value="${state.me.role === "USER" || state.me.role === "PARTICIPANT" ? (state.me.participantId || "") : ""}">${state.me.role === "ADMIN" ? `<select name="participantId" required><option value="">Участник *</option>${opts(state.participants)}</select>` : ""}<select name="textbookId" required><option value="">Учебник *</option>${opts(state.textbooks, "title")}</select><input name="quantity" type="number" min="1" value="1" required><button class="primary">Создать заказ КМ</button></form>` : empty("Создание заказов недоступно для этой роли");
+    const form = state.me.role === "ADMIN" || state.me.role === "USER" ? `<form id="orderForm" class="form"><input type="hidden" name="participantId" value="${state.me.role === "USER" ? (state.me.participantId || "") : ""}">${state.me.role === "ADMIN" ? `<select name="participantId" required><option value="">Участник *</option>${opts(state.participants)}</select>` : ""}<select name="textbookId" required><option value="">Учебник *</option>${opts(state.textbooks, "title")}</select><input name="quantity" type="number" min="1" value="1" required><button class="primary">Создать заказ КМ</button></form>` : empty("Создание заказов недоступно для этой роли");
     $("content").innerHTML = `<div class="grid2">${panel("Новый заказ КМ", form)}${panel("Заказы", table(["ID", "GTIN", "Количество", "Сумма", "Статус"], rows))}</div>`;
     if ($("orderForm")) formSubmit("orderForm", async f => {
         const q = Object.fromEntries(f.entries());
@@ -226,7 +226,7 @@ function orders() {
 }
 
 function operations() {
-    const rows = state.operations.map(x => `<tr><td>${esc(x.type)}</td><td>${x.quantity}</td><td>${status(x.status)}</td><td>${esc(x.reason)}</td><td>${esc(x.billingOperationId || "")}</td><td>${esc(x.createdAt)}</td></tr>`).join("");
+    const rows = state.operations.map(x => `<tr><td>${esc(x.type)}</td><td>${x.quantity}</td><td>${status(x.status)}</td><td>${esc(x.reason)}</td><td>${esc(x.billingId || "")}</td><td>${esc(x.createdAt)}</td></tr>`).join("");
     const available = state.codes.filter(c => c.status === "EMITTED" || c.status === "APPLIED" || c.status === "IN_CIRCULATION");
     const form = `<form id="operationForm" class="form">
       <select name="type" required>
@@ -257,7 +257,7 @@ function operations() {
 }
 
 function documents() {
-    const rows = state.documents.map(x => `<tr><td>${esc(x.number)}</td><td>${esc(x.type)}</td><td>${status(x.status)}</td><td>${esc(x.operationId || "")}</td><td>${esc(x.billingOperationId || "")}</td><td>${esc(x.createdAt)}</td></tr>`).join("");
+    const rows = state.documents.map(x => `<tr><td>${esc(x.number)}</td><td>${esc(x.type)}</td><td>${status(x.status)}</td><td>${esc(x.operationId || "")}</td><td>${esc(x.billingId || "")}</td><td>${esc(x.createdAt)}</td></tr>`).join("");
     $("content").innerHTML = panel("Документы", table(["Номер","Тип","Статус","Операция","Billing ID","Дата"], rows));
 }
 
