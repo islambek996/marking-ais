@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: marking-ais-backend
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    branch: main
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
